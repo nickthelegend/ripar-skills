@@ -1,0 +1,84 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The live tests read TestNet, so they can go stale without anyone touching
+  # this repo — a registry redeployed elsewhere breaks them silently. A nightly
+  # run is how that gets noticed before somebody's agent does.
+  schedule:
+    - cron: "17 4 * * *"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: typecheck + tests + the MCP server really starts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 24, not 22. The lockfile is written by npm 11, and Node 22 ships
+          # npm 10, which fails `npm ci` with "Missing: picomatch from lock
+          # file" — a message that says nothing about the actual cause.
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
+
+      # Includes test/live.test.ts, which reads the deployed registries rather
+      # than fixtures. That is the point: a decoder that drifts from what the
+      # contracts actually write fails here instead of at runtime.
+      - run: npm test
+
+      # dist/ is committed so `npx github:...` works without a build step, and
+      # a stale dist is invisible until somebody installs it.
+      - name: the committed dist is the output of the committed source
+        run: |
+          if ! git diff --quiet -- dist; then
+            echo "::error::dist/ is stale. Run npm run build and commit it —"
+            echo "the agent card tells peers to run this straight from GitHub."
+            git diff --stat -- dist
+            exit 1
+          fi
+
+      - name: the MCP server answers a real initialize
+        run: |
+          node -e '
+            const { spawn } = require("node:child_process");
+            const p = spawn("node", ["dist/bin/mcp-stdio.js"], { stdio: ["pipe", "pipe", "inherit"] });
+            let buf = "";
+            const seen = [];
+            p.stdout.on("data", (d) => {
+              buf += d;
+              let i;
+              while ((i = buf.indexOf("\n")) >= 0) {
+                const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+                if (line) try { seen.push(JSON.parse(line)); } catch {}
+              }
+            });
+            const send = (o) => p.stdin.write(JSON.stringify(o) + "\n");
+            send({ jsonrpc: "2.0", id: 1, method: "initialize",
+                   params: { protocolVersion: "2024-11-05", capabilities: {},
+                             clientInfo: { name: "ci", version: "1" } } });
+            setTimeout(() => {
+              send({ jsonrpc: "2.0", method: "notifications/initialized" });
+              send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+            }, 1000);
+            setTimeout(() => {
+              const tools = seen.find((m) => m.id === 2)?.result?.tools ?? [];
+              p.kill();
+              if (!tools.length) { console.error("the MCP server registered no tools"); process.exit(1); }
+              console.log("MCP server registered", tools.length, "tools");
+            }, 3000);
+          '
