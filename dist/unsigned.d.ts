@@ -169,3 +169,79 @@ export declare function composeRefundEscrow(config: RiparConfig, input: {
     sender: string;
     jobId: number;
 }): Promise<UnsignedTransaction>;
+/**
+ * sha256 of the pitch text, as hex. The text itself never leaves this process.
+ *
+ * UTF-8, explicitly, because the digest is a commitment two parties have to
+ * agree on: the bidder hashes the words and the client re-hashes them later to
+ * check they were shown the same offer. An encoding either side has to guess at
+ * would make honest pitches fail that check.
+ */
+export declare function hashPitch(pitch: string): string;
+/**
+ * Compose `place_bid` — offer to do a job at a price.
+ *
+ * The pitch is COMMITTED BY HASH, not stored. What goes on chain is 32 bytes;
+ * the words stay wherever the bidder keeps them. That is the same rule the spec
+ * and the result already follow, and it is doing real work here: a bid board
+ * that stored prose would put every agent's sales copy into permanent, paid box
+ * storage, and a client could still not prove the pitch they read was the one
+ * bid under. A hash proves exactly that, and costs 32 bytes.
+ *
+ * Because the text is not recoverable from the chain, the BIDDER has to keep
+ * it. This function returns the hash and says so; it does not store anything.
+ */
+export declare function composePlaceBid(config: RiparConfig, input: {
+    sender: string;
+    jobId: number;
+    bidderAgentId: number;
+    priceMicro: number;
+    /** The pitch text. Hashed here; never sent anywhere. */
+    pitch?: string;
+    /** Or the digest directly, when the bidder hashed it themselves. */
+    pitchHash?: string;
+}): Promise<UnsignedTransaction>;
+/**
+ * Compose `accept_bid` — take an offer.
+ *
+ * **Accepting REWRITES the job's budget to the bid price.** That is not a side
+ * effect, it is the point: accepting an offer of 0.4 on a job budgeted at 1.0
+ * should leave the record saying 0.4, because otherwise the job, the escrow and
+ * any release all disagree about what was agreed, and a release reading the old
+ * budget would pay a number nobody offered. The summary states the before and
+ * after explicitly so the client signs knowing which of the two numbers
+ * survives.
+ *
+ * It also assigns the job, in the same call. There is no separate assign step
+ * and no window in which the job is assigned at the old price.
+ */
+export declare function composeAcceptBid(config: RiparConfig, input: {
+    sender: string;
+    jobId: number;
+    bidderAgentId: number;
+}): Promise<UnsignedTransaction>;
+/**
+ * Compose `rotate_address` — move an identity to a new controlling key.
+ *
+ * This is the recovery path, and without it a compromised key is TERMINAL.
+ * `new_agent` asserts one identity per address, so the owner of a stolen key
+ * can neither re-register nor reclaim: the agent id, and every score and job
+ * that references it, stays bound to a key somebody else holds. An identity you
+ * cannot move is an identity you cannot secure.
+ *
+ * The reverse index moves with it, which is the part that matters for anyone
+ * about to pay. `ad_<old key>` is DELETED, so **the old address stops resolving
+ * to this agent**. If it kept resolving, a caller running the obvious check —
+ * "does the address this card wants me to pay match the registry?" — would
+ * still get a match on the compromised key, and the rotation would have secured
+ * nothing.
+ *
+ * Only the CURRENT address may sign, so this is a race: it recovers a key you
+ * fear is exposed, and it is useless against one already being used against
+ * you. Rotate on suspicion, not on confirmation.
+ */
+export declare function composeRotateAddress(config: RiparConfig, input: {
+    sender: string;
+    agentId: number;
+    newAddress: string;
+}): Promise<UnsignedTransaction>;

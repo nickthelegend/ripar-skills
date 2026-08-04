@@ -25,6 +25,14 @@ export const AGENT_INFO_TYPE = "(uint64,string,address,uint64,uint64)";
 export const SCORE_TYPE = "(uint64,uint64,uint64,uint64,uint64,uint64,uint64)";
 /** ValidationRegistry `Job` — jobs box map, prefix `jb_`. */
 export const JOB_TYPE = "(uint64,address,uint64,uint64,uint64,byte[],byte[],uint64,uint64,uint64)";
+/**
+ * ValidationRegistry `Bid` — bids box map, prefix `bd_`.
+ *
+ * `pitch_hash` is a `byte[]`, so this struct is dynamic and its head is 8+8+8+2+8
+ * with the pitch's length prefix and bytes in the tail — the same trap
+ * `AgentInfo` sets with its domain. Read it with ABIType, never by offset.
+ */
+export const BID_TYPE = "(uint64,uint64,uint64,byte[],uint64)";
 /** Timestamps are unix seconds; 0 means "never happened", not "the epoch". */
 function isoOrNull(unixSeconds) {
     return unixSeconds > 0 ? new Date(unixSeconds * 1000).toISOString() : null;
@@ -99,6 +107,16 @@ export function decodeJobBox(value) {
         updatedAt: n(t[9]),
     };
 }
+export function decodeBidBox(value) {
+    const t = ABIType.from(BID_TYPE).decode(value);
+    return {
+        jobId: n(t[0]),
+        bidderAgentId: n(t[1]),
+        priceMicro: n(t[2]),
+        pitchHash: toHex(bytesOf(t[3])),
+        placedAt: n(t[4]),
+    };
+}
 /**
  * `dm_` and `ad_` boxes hold a bare uint64 — the agent id — so a lookup is one
  * box read rather than a scan. 0 is the contract's "not found" sentinel and the
@@ -159,6 +177,56 @@ export function jobBoxName(jobId) {
  */
 export function escrowBoxName(jobId) {
     return withPrefix(BOX_PREFIX.escrow, uint64Bytes(jobId));
+}
+/**
+ * `bd_` + itob(job_id) + itob(bidder_agent_id) — 19 bytes.
+ *
+ * The contract's box map is `BoxMap(Bytes, Bid, key_prefix=b"bd_")` and its
+ * `_bid_key` subroutine builds the key as `op.itob(job) + op.itob(bidder)`.
+ * Because the KEY TYPE is `Bytes`, algopy stores it raw: there is NO ARC-4
+ * length prefix in front of those 16 bytes, which is exactly the difference
+ * that makes `dm_` work on raw UTF-8 rather than on an encoded `string`.
+ *
+ * Keying on both ids is what makes a bid addressable without iteration AND
+ * makes a second bid from the same agent replace the first rather than stack
+ * up beside it.
+ */
+export function bidBoxName(jobId, bidderAgentId) {
+    const key = new Uint8Array(16);
+    key.set(uint64Bytes(jobId), 0);
+    key.set(uint64Bytes(bidderAgentId), 8);
+    return withPrefix(BOX_PREFIX.bid, key);
+}
+/**
+ * The prefix that selects every bid on ONE job: `bd_` + itob(job_id).
+ *
+ * The job id is the FIRST half of the key precisely so this works — algod
+ * filters box listings by a byte prefix, so "all bids on job 7" is one
+ * server-side filtered listing instead of a scan of every bid ever placed.
+ */
+export function bidPrefixForJob(jobId) {
+    return withPrefix(BOX_PREFIX.bid, uint64Bytes(jobId));
+}
+/**
+ * Both ids back out of a `bd_` box name.
+ *
+ * Throws on anything else. A bid attributed to the wrong job or the wrong
+ * bidder is worse than no bid at all: it is a price somebody never offered,
+ * shown next to work they never saw.
+ */
+export function bidKeyFromBoxName(name) {
+    const head = new TextEncoder().encode(BOX_PREFIX.bid);
+    const matches = name.length === head.length + 16 && head.every((b, i) => name[i] === b);
+    if (!matches) {
+        throw new Error(`Not a ${BOX_PREFIX.bid}<uint64><uint64> box name: ${toHex(name)}`);
+    }
+    // slice() copies, so the DataView cannot land on a pooled Buffer's neighbours.
+    const tail = name.slice(head.length);
+    const view = new DataView(tail.buffer, tail.byteOffset, 16);
+    return {
+        jobId: Number(view.getBigUint64(0, false)),
+        bidderAgentId: Number(view.getBigUint64(8, false)),
+    };
 }
 /**
  * The id back out of a `<prefix>` + uint64 box name, for turning a box LISTING

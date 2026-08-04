@@ -35,9 +35,11 @@ export {
   AGENT_INFO_TYPE,
   SCORE_TYPE,
   JOB_TYPE,
+  BID_TYPE,
   decodeAgentBox,
   decodeScoreBox,
   decodeJobBox,
+  decodeBidBox,
   decodeUint64Box,
   agentBoxName,
   domainBoxName,
@@ -45,6 +47,9 @@ export {
   scoreBoxName,
   jobBoxName,
   escrowBoxName,
+  bidBoxName,
+  bidPrefixForJob,
+  bidKeyFromBoxName,
   idFromBoxName,
   base32TxIdToBytes,
   uint64Bytes,
@@ -53,6 +58,7 @@ export {
   type Agent,
   type Score,
   type Job,
+  type Bid,
 } from "./abi.js";
 
 export {
@@ -87,6 +93,10 @@ export {
   composeFundJob,
   composeReleaseEscrow,
   composeRefundEscrow,
+  composePlaceBid,
+  composeAcceptBid,
+  composeRotateAddress,
+  hashPitch,
   suggestedParams,
   type BoxRef,
   type UnsignedTransaction,
@@ -94,10 +104,37 @@ export {
   type UnsignedGroupMember,
 } from "./unsigned.js";
 
+/**
+ * The gap between the source tree and the chain, as callable functions.
+ *
+ * Exported because it is a fact about the deployment that anything building on
+ * this package needs — not an internal detail of the compose path.
+ */
+export {
+  CONTRACT_METHODS,
+  MethodNotDeployedError,
+  isMethodDeployed,
+  assertMethodDeployed,
+  approvalProgram,
+  selectorOf,
+  deploymentReport,
+  clearDeployedCache,
+  type ContractMethodName,
+} from "./deployed.js";
+
+export {
+  agentHealth,
+  type AgentHealthReport,
+  type AgentHealthOptions,
+  type HealthCheck,
+  type CheckStatus,
+} from "./health.js";
+
 export {
   quoteEndpoint,
   callEndpoint,
   parseChallenge,
+  challengeFromResponse,
   type Quote,
   type CallResult,
   type PaymentRequirement,

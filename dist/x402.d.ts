@@ -60,6 +60,22 @@ export type Quote = {
  * key name is a quote that pushes the caller to guess a price instead.
  */
 export declare function parseChallenge(body: unknown): X402Challenge | null;
+/**
+ * Pull a challenge out of a 402 from EITHER place it is allowed to live.
+ *
+ * x402 v2 carries the requirements in a `payment-required` response header as
+ * base64 JSON, and a server that does so may then send an empty body — Ripar's
+ * own live agent at api.ripar.io does exactly that, answering
+ * `402 payment-required: eyJ4NDAyVmVyc2lvbiI6Mi…` with a body of `{}`.
+ *
+ * Reading only the body reports those as "402 with no readable accepts list",
+ * which is a finding about a completely correct server, and one that would push
+ * a caller to guess a price. The header is checked FIRST because when both are
+ * present it is the normative copy.
+ */
+export declare function challengeFromResponse(res: Pick<Response, "headers">, body: unknown): (X402Challenge & {
+    from: "header" | "body";
+}) | null;
 export type QuoteOptions = {
     method?: string;
     headers?: Record<string, string>;

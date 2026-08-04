@@ -1,0 +1,171 @@
+name: supply-chain
+
+# Three questions the build job does not answer:
+#
+#   1. Is there a credential in this tree?
+#   2. Does anything this package installs have a known high or critical
+#      vulnerability?
+#   3. What, exactly, does it install?
+#
+# Separate from ci.yml on purpose. These fail for reasons that have nothing to
+# do with the code in a pull request — a new advisory can turn this red on a
+# Tuesday when nobody pushed anything — and mixing that into the build job
+# makes "is my change broken?" unanswerable at a glance.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # An advisory published today is a vulnerability this repo had yesterday.
+  # Nothing about that shows up on a push, so the audit has to run on a clock
+  # or it only ever reports what was already known when someone last typed.
+  schedule:
+    - cron: "23 5 * * *"
+
+concurrency:
+  group: supply-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Secrets.
+  #
+  # The scanner lives in ripar-contracts and is CHECKED OUT here rather than
+  # copied. Four copies of a rule list is exactly the drift this org has already
+  # been bitten by twice over registry app ids: a rule added to one copy and not
+  # the others is a scanner that protects one repo and silently stops protecting
+  # the rest. One copy also keeps the two hard-won exclusions in one place — the
+  # `re_after_inlined_…` labels in compiled TEAL, which a naive Resend-key regex
+  # flags twelve times, and npm lockfile `sha512-` integrity hashes, which are
+  # byte-identical in shape to a 64-byte ed25519 secret key.
+  #
+  # It scans the WORKING TREE, not git history. A key that was committed and
+  # later removed is still in the history and this cannot see it.
+  # ---------------------------------------------------------------------------
+  secrets:
+    name: no secrets in the tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: fetch the scanner
+        uses: actions/checkout@v4
+        with:
+          repository: nickthelegend/ripar-contracts
+          path: tools
+          sparse-checkout: scripts
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # No `npm ci` anywhere in this job: the scanner has no dependencies, and
+      # installing the tree before scanning it would mean scanning node_modules
+      # for other people's test fixtures.
+      - name: scan
+        run: node tools/scripts/scan-secrets.mjs repo
+
+  # ---------------------------------------------------------------------------
+  # 2. Dependencies.
+  #
+  # Two audits, because they answer different questions and only one of them is
+  # about the people who install this package.
+  #
+  #   production — what a consumer of @ripar/skills actually gets. This is the
+  #                blocking one. A high or critical here ships to everybody who
+  #                runs `npx github:nickthelegend/ripar-skills`.
+  #   everything — including devDependencies. Also blocking, and it passes
+  #                today: vitest was moved from ^2.1.9 to ^3 for exactly this
+  #                reason. vitest <3.2.6 carried GHSA-5xrq-8626-4rwp (critical,
+  #                arbitrary file read via the UI server) and its vite/esbuild
+  #                chain carried three more. `npm audit fix --force` wanted to
+  #                jump to vitest 4, which changes test-execution behaviour;
+  #                3.2.7 clears every advisory and the 267 tests pass on it.
+  # ---------------------------------------------------------------------------
+  audit:
+    name: no high or critical advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: what a consumer installs
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: what a contributor installs
+        run: npm audit --audit-level=high
+
+      # Runs even when the audits above failed, so the log says WHAT is
+      # vulnerable and not merely that something is. `|| true` because this is
+      # the explanation, not the gate — the gate already ran.
+      - name: the full picture, for the log
+        if: always()
+        run: npm audit || true
+
+  # ---------------------------------------------------------------------------
+  # 3. SBOM.
+  #
+  # CycloneDX 1.6, as a build artifact. This package is installed straight from
+  # GitHub — the agent card tells peers to run `npx github:nickthelegend/…` —
+  # so there is no npm registry page listing its dependency tree and no
+  # published version anyone can look up. The SBOM is that list.
+  #
+  # Two of them, because the interesting number is the difference: `runtime` is
+  # what an agent operator is exposed to by using this, `full` is what a
+  # contributor is exposed to by working on it.
+  # ---------------------------------------------------------------------------
+  sbom:
+    name: sbom
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: runtime dependencies
+        run: >
+          npx --yes @cyclonedx/cyclonedx-npm@^4
+          --omit dev
+          --output-format JSON
+          --output-file sbom-runtime.cdx.json
+
+      - name: every dependency, including dev
+        run: >
+          npx --yes @cyclonedx/cyclonedx-npm@^4
+          --output-format JSON
+          --output-file sbom-full.cdx.json
+
+      # Printed, not just uploaded. An artifact nobody downloads tells nobody
+      # anything, and the component count moving from 101 to 400 between two
+      # runs is the kind of thing worth seeing in a log.
+      - name: summarise
+        run: |
+          for f in sbom-runtime.cdx.json sbom-full.cdx.json; do
+            node -e "
+              const s = require('./$f');
+              console.log('$f', s.bomFormat, s.specVersion, '-', s.components.length, 'components');
+            "
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-ripar-skills
+          path: sbom-*.cdx.json
+          if-no-files-found: error

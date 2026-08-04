@@ -367,6 +367,47 @@ describe("prompts", () => {
     expect(text).toContain("ripar_settle_escrow");
   });
 
+  it("recover_compromised_key leads with the race, and verifies rather than assuming", async () => {
+    const client = await connect();
+    const result = await client.getPrompt({
+      name: "recover_compromised_key",
+      arguments: { agent: "ripar-agent.vercel.app", newAddress: CLIENT_ADDR },
+    });
+    const text = (result.messages[0]!.content as { text: string }).text;
+
+    // The single fact that changes what someone does: only the current key can
+    // rotate, so whoever stole it can rotate first. Buried, it is useless.
+    expect(text).toMatch(/rotation is a RACE/);
+    expect(text.indexOf("RACE")).toBeLessThan(text.indexOf("ripar_rotate_address"));
+
+    expect(text).toContain("ripar-agent.vercel.app");
+    expect(text).toContain(CLIENT_ADDR);
+    expect(text).toContain("ripar_rotate_address");
+
+    // The consequence a payer depends on.
+    expect(text).toMatch(/THE OLD ADDRESS STOPS RESOLVING/);
+    // Verification AFTER the fact, both directions.
+    expect(text).toMatch(/must resolve to NOTHING/);
+    // The loose end: the card still names the old address.
+    expect(text).toContain("ripar_agent_health");
+    expect(text).toMatch(/payTo names the OLD address/);
+    // And it must prepare the model for a refusal on the live chain rather
+    // than letting it improvise one.
+    expect(text).toMatch(/not in the deployed IdentityRegistry's/);
+    expect(text).toMatch(/deregister_agent/);
+  });
+
+  it("recover_compromised_key handles a missing newAddress without printing undefined", async () => {
+    const client = await connect();
+    const result = await client.getPrompt({
+      name: "recover_compromised_key",
+      arguments: { agent: "1" },
+    });
+    const text = (result.messages[0]!.content as { text: string }).text;
+    expect(text).not.toContain("undefined");
+    expect(text).toMatch(/generate a fresh Algorand account/);
+  });
+
   it("rejects a prompt whose required arguments are missing", async () => {
     const client = await connect();
     await expect(

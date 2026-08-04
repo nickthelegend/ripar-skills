@@ -11,7 +11,10 @@ import algosdk from "algosdk";
 import {
   addressBoxName,
   agentBoxName,
+  bidKeyFromBoxName,
+  bidPrefixForJob,
   decodeAgentBox,
+  decodeBidBox,
   decodeJobBox,
   decodeScoreBox,
   decodeUint64Box,
@@ -21,6 +24,7 @@ import {
   jobBoxName,
   scoreBoxName,
   type Agent,
+  type Bid,
   type Job,
   type Score,
 } from "./abi.js";
@@ -120,11 +124,17 @@ export class RiparRegistry {
    */
   async listBoxNames(
     appId: number,
-    prefix: string,
+    /**
+     * A text prefix like `ag_`, or raw bytes when the key is not text —
+     * `bd_` + itob(job_id) selects one job's bids and those 8 bytes are not
+     * UTF-8. Encoding them as text would mangle every byte above 0x7f and the
+     * filter would silently match nothing.
+     */
+    prefix: string | Uint8Array,
     pageSize = 1000,
     maxPages = 100
   ): Promise<Uint8Array[]> {
-    const wanted = new TextEncoder().encode(prefix);
+    const wanted = typeof prefix === "string" ? new TextEncoder().encode(prefix) : prefix;
     const prefixParam = encodeURIComponent(`b64:${b64.encode(wanted)}`);
     const names: Uint8Array[] = [];
     let next: string | undefined;
@@ -277,6 +287,65 @@ export class RiparRegistry {
       jobs = jobs.filter((j) => j.serverAgentId === agentId || j.validatorAgentId === agentId);
     }
     return jobs.sort((a, b) => b.jobId - a.jobId).slice(0, limit);
+  }
+
+  // ------------------------------------------------------------------ bids
+
+  /**
+   * Every bid on one job, cheapest first.
+   *
+   * One server-side-filtered listing over `bd_` + itob(job_id), then a read per
+   * box. The composite key is what makes that possible: the job id is the first
+   * half, so algod's `prefix=` does the selection and this never sees a bid on
+   * another job.
+   *
+   * **Losing bids are kept deliberately.** `accept_bid` does NOT sweep the
+   * boxes it rejected — a board that erases what it turned down cannot be
+   * checked afterwards, and "we picked the cheapest" is a claim you should be
+   * able to verify against the ones that lost. So a bid appearing here does not
+   * mean it is live: read the JOB's status alongside. Only a bid on an OPEN job
+   * can still be accepted, and only the bidder can remove their own.
+   *
+   * An empty list is a real answer, and on the CURRENTLY DEPLOYED
+   * ValidationRegistry (768572979) it is the only answer this can give: that
+   * app predates `place_bid`, so no `bd_` box exists or can exist on it. See
+   * `deployed.ts` — the reads here are honest either way, and it is the WRITE
+   * path that has to refuse.
+   */
+  async listBids(jobId: number, limit = 100): Promise<Bid[]> {
+    if (!Number.isInteger(jobId) || jobId < 1) return [];
+    const appId = this.appId("validation");
+    const names = await this.listBoxNames(appId, bidPrefixForJob(jobId));
+    const values = await Promise.all(names.map((n) => this.readBox(appId, n)));
+
+    const bids: Bid[] = [];
+    names.forEach((name, i) => {
+      const value = values[i];
+      // Withdrawn between the listing and the read. Not a bid any more.
+      if (!value) return;
+      const bid = decodeBidBox(value);
+      // The key is authoritative and the value is what the contract wrote; if
+      // they disagree the box is not what it claims to be, and quietly
+      // preferring one would attribute a price to an agent that never offered
+      // it. Refuse the record instead of guessing which half is right.
+      const key = bidKeyFromBoxName(name);
+      if (key.jobId !== bid.jobId || key.bidderAgentId !== bid.bidderAgentId) {
+        throw new RiparReadError(
+          `Bid box ${BOX_PREFIX.bid}(job ${key.jobId}, agent ${key.bidderAgentId}) decodes to job ` +
+            `${bid.jobId} / agent ${bid.bidderAgentId}. The key and the value disagree, so this is ` +
+            `not a record either of them can be trusted for.`,
+          "bad_response"
+        );
+      }
+      bids.push(bid);
+    });
+
+    // Cheapest first, ties broken by who bid earliest — the same order a client
+    // reading the board would apply, made explicit rather than left to algod's
+    // box ordering, which is lexicographic by key and therefore by agent id.
+    return bids
+      .sort((a, b) => a.priceMicro - b.priceMicro || a.placedAt - b.placedAt)
+      .slice(0, limit);
   }
 
   // ---------------------------------------------------------------- escrow

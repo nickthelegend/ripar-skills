@@ -16,9 +16,20 @@
  * so the split costs the caller one paste.
  */
 
+import { createHash } from "node:crypto";
 import algosdk from "algosdk";
-import { agentBoxName, escrowBoxName, fromHex, jobBoxName, uint64Bytes } from "./abi.js";
+import {
+  addressBoxName,
+  agentBoxName,
+  bidBoxName,
+  escrowBoxName,
+  fromHex,
+  jobBoxName,
+  toHex,
+  uint64Bytes,
+} from "./abi.js";
 import { RiparRegistry, microToUsdc, type EscrowTerms, type JobWithEscrow } from "./registry.js";
+import { CONTRACT_METHODS, assertMethodDeployed } from "./deployed.js";
 import type { RiparConfig } from "./config.js";
 
 const {
@@ -565,6 +576,387 @@ export async function composeRefundEscrow(
       "Anyone may sign this: the contract puts no condition on the sender, because the money can only go to the client.",
       "Sign it with the wallet that holds `sender` — this package holds no key and cannot.",
       "Submit the signed bytes to POST {algod}/v2/transactions.",
+    ],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Bidding. Every composer below FIRST checks the live approval program for the
+// method's selector, because these are the features that exist in
+// ripar-contracts and not on chain. See deployed.ts for why an absent selector
+// is proof and a present one is only strong evidence.
+// ---------------------------------------------------------------------------
+
+/**
+ * sha256 of the pitch text, as hex. The text itself never leaves this process.
+ *
+ * UTF-8, explicitly, because the digest is a commitment two parties have to
+ * agree on: the bidder hashes the words and the client re-hashes them later to
+ * check they were shown the same offer. An encoding either side has to guess at
+ * would make honest pitches fail that check.
+ */
+export function hashPitch(pitch: string): string {
+  return createHash("sha256").update(Buffer.from(pitch, "utf8")).digest("hex");
+}
+
+/**
+ * Compose `place_bid` — offer to do a job at a price.
+ *
+ * The pitch is COMMITTED BY HASH, not stored. What goes on chain is 32 bytes;
+ * the words stay wherever the bidder keeps them. That is the same rule the spec
+ * and the result already follow, and it is doing real work here: a bid board
+ * that stored prose would put every agent's sales copy into permanent, paid box
+ * storage, and a client could still not prove the pitch they read was the one
+ * bid under. A hash proves exactly that, and costs 32 bytes.
+ *
+ * Because the text is not recoverable from the chain, the BIDDER has to keep
+ * it. This function returns the hash and says so; it does not store anything.
+ */
+export async function composePlaceBid(
+  config: RiparConfig,
+  input: {
+    sender: string;
+    jobId: number;
+    bidderAgentId: number;
+    priceMicro: number;
+    /** The pitch text. Hashed here; never sent anywhere. */
+    pitch?: string;
+    /** Or the digest directly, when the bidder hashed it themselves. */
+    pitchHash?: string;
+  }
+): Promise<UnsignedTransaction> {
+  const appId = config.appIds.validation;
+  if (!appId) throw new Error("No ValidationRegistry app id for this network");
+
+  await assertMethodDeployed(
+    config,
+    appId,
+    CONTRACT_METHODS.place_bid.signature,
+    `Bidding is written in ripar-contracts/contracts/validation_registry.py and compiles, but the ` +
+      `ValidationRegistry that is live on TestNet predates it. Until a registry with place_bid is ` +
+      `deployed, the way onto a job is the client naming you directly with assign_job — there is no ` +
+      `bid to place, and ripar_list_bids on this registry will always be empty for the same reason.`
+  );
+
+  if (!Number.isInteger(input.priceMicro) || input.priceMicro <= 0) {
+    throw new Error("priceMicro must be a positive integer; the contract rejects a zero bid");
+  }
+  if (!Number.isInteger(input.bidderAgentId) || input.bidderAgentId < 1) {
+    throw new Error("bidderAgentId must be a registered agent id");
+  }
+
+  // Exactly one source for the commitment. Accepting both and preferring one
+  // would let a caller show a pitch while committing to a different digest.
+  if ((input.pitch === undefined) === (input.pitchHash === undefined)) {
+    throw new Error(
+      "Give exactly one of `pitch` (the text, hashed here) or `pitchHash` (a digest you made yourself). " +
+        "Both would let the text and the commitment disagree; neither leaves nothing to commit to."
+    );
+  }
+  const pitchHash = input.pitch !== undefined ? hashPitch(input.pitch) : input.pitchHash!;
+  const digest = fromHex(pitchHash);
+  if (digest.length !== 32) {
+    throw new Error(`pitchHash must be a 32-byte sha256 digest, got ${digest.length} bytes`);
+  }
+
+  // Both are contract asserts, and both are cheaper to fail here.
+  const registry = new RiparRegistry(config);
+  const [job, bidder] = await Promise.all([
+    registry.getJob(input.jobId),
+    registry.getAgent(input.bidderAgentId),
+  ]);
+  if (!job) throw new Error(`No job ${input.jobId} in the ValidationRegistry`);
+  if (job.status !== "open") {
+    throw new Error(
+      `Job ${job.jobId} is ${job.status}; bids close when the job is assigned. A bid that looks ` +
+        `live on work somebody else is already doing misleads whoever reads the board.`
+    );
+  }
+  if (!bidder) {
+    throw new Error(
+      `The IdentityRegistry has no agent ${input.bidderAgentId}. The contract resolves the bidder ` +
+        `through it and would reject this — only the bidding agent's own address may bid.`
+    );
+  }
+  if (bidder.address !== input.sender) {
+    throw new Error(
+      `Agent ${input.bidderAgentId} is controlled by ${bidder.address}, not ${input.sender}. ` +
+        `Only the bidding agent may place its own bid, so an agent cannot be bid on behalf of.`
+    );
+  }
+  if (job.client === input.sender) {
+    throw new Error(`${input.sender} is the client of job ${job.jobId} and cannot bid on it`);
+  }
+
+  const identityApp = config.appIds.identity;
+  return composeAppCall(config, {
+    sender: input.sender,
+    appId,
+    signature: CONTRACT_METHODS.place_bid.signature,
+    encodedArgs: [
+      uint64Bytes(input.jobId),
+      uint64Bytes(input.bidderAgentId),
+      uint64Bytes(input.priceMicro),
+      ABIType.from("byte[]").encode(digest),
+    ],
+    boxes: [
+      { name: jobBoxName(input.jobId) },
+      { name: bidBoxName(input.jobId, input.bidderAgentId) },
+      // Read by the IdentityRegistry when it resolves the bidder. Box refs are
+      // group-wide by app id, so the foreign box is declared on this call.
+      { name: agentBoxName(input.bidderAgentId), appId: identityApp },
+    ],
+    foreignApps: [identityApp],
+    // _agent_address() resolves the bidder by inner app call.
+    innerTransactions: 1,
+    summary:
+      `Bid ${microToUsdc(input.priceMicro)} on job ${job.jobId} as agent ${input.bidderAgentId} ` +
+      `(${bidder.domain}). The job's stated budget is ${microToUsdc(job.budgetMicro)}. ` +
+      `Only the 32-byte hash ${pitchHash} goes on chain — THE PITCH TEXT STAYS OFF CHAIN, so keep ` +
+      `it: nobody, including this tool, can recover it from the registry, and you will need it to ` +
+      `show the client what they are accepting. A second bid from this agent on this job REPLACES ` +
+      `this one.`,
+    args: {
+      jobId: job.jobId,
+      bidderAgentId: input.bidderAgentId,
+      bidderDomain: bidder.domain,
+      bidderAddress: bidder.address,
+      priceMicro: input.priceMicro,
+      priceUsdc: microToUsdc(input.priceMicro),
+      jobBudgetMicro: job.budgetMicro,
+      jobBudgetUsdc: microToUsdc(job.budgetMicro),
+      undercutsBudget: input.priceMicro < job.budgetMicro,
+      pitchHash,
+      pitchStoredOnChain: false,
+      pitchBytesOnChain: 32,
+    },
+    nextSteps: [
+      `Keep the pitch text. The chain holds ${pitchHash} and nothing else, and a commitment you ` +
+        `cannot open is a commitment to nothing.`,
+      "Sign it with the wallet that holds `sender` — this package holds no key and cannot.",
+      "Submit the signed bytes to POST {algod}/v2/transactions.",
+      "Accepting is the client's move, not yours: they call accept_bid, which assigns the job to you AND rewrites its budget to your price.",
+    ],
+  });
+}
+
+/**
+ * Compose `accept_bid` — take an offer.
+ *
+ * **Accepting REWRITES the job's budget to the bid price.** That is not a side
+ * effect, it is the point: accepting an offer of 0.4 on a job budgeted at 1.0
+ * should leave the record saying 0.4, because otherwise the job, the escrow and
+ * any release all disagree about what was agreed, and a release reading the old
+ * budget would pay a number nobody offered. The summary states the before and
+ * after explicitly so the client signs knowing which of the two numbers
+ * survives.
+ *
+ * It also assigns the job, in the same call. There is no separate assign step
+ * and no window in which the job is assigned at the old price.
+ */
+export async function composeAcceptBid(
+  config: RiparConfig,
+  input: { sender: string; jobId: number; bidderAgentId: number }
+): Promise<UnsignedTransaction> {
+  const appId = config.appIds.validation;
+  if (!appId) throw new Error("No ValidationRegistry app id for this network");
+
+  await assertMethodDeployed(
+    config,
+    appId,
+    CONTRACT_METHODS.accept_bid.signature,
+    `accept_bid exists in ripar-contracts/contracts/validation_registry.py and compiles, but the ` +
+      `live ValidationRegistry predates it — and so does place_bid, so there are no bids on it to ` +
+      `accept. What works today is assign_job: the client names the agent, and the budget stays ` +
+      `whatever was posted.`
+  );
+
+  const registry = new RiparRegistry(config);
+  const job = await registry.getJob(input.jobId);
+  if (!job) throw new Error(`No job ${input.jobId} in the ValidationRegistry`);
+  if (job.client !== input.sender) {
+    throw new Error(
+      `Only the client may accept a bid. Job ${job.jobId}'s client is ${job.client}, not ${input.sender}`
+    );
+  }
+  if (job.status !== "open") {
+    throw new Error(`Job ${job.jobId} is ${job.status}; a bid can only be accepted while it is open`);
+  }
+
+  const bids = await registry.listBids(input.jobId);
+  const bid = bids.find((b) => b.bidderAgentId === input.bidderAgentId);
+  if (!bid) {
+    throw new Error(
+      `Agent ${input.bidderAgentId} has no bid on job ${input.jobId}. ` +
+        (bids.length
+          ? `The bids on it are from agents ${bids.map((b) => b.bidderAgentId).join(", ")}.`
+          : `There are no bids on it at all.`)
+    );
+  }
+  const bidder = await registry.getAgent(input.bidderAgentId);
+
+  const identityApp = config.appIds.identity;
+  const delta = bid.priceMicro - job.budgetMicro;
+  return composeAppCall(config, {
+    sender: input.sender,
+    appId,
+    signature: CONTRACT_METHODS.accept_bid.signature,
+    encodedArgs: [uint64Bytes(input.jobId), uint64Bytes(input.bidderAgentId)],
+    boxes: [
+      { name: jobBoxName(input.jobId) },
+      { name: bidBoxName(input.jobId, input.bidderAgentId) },
+      { name: agentBoxName(input.bidderAgentId), appId: identityApp },
+    ],
+    foreignApps: [identityApp],
+    summary:
+      `Accept agent ${input.bidderAgentId}${bidder ? ` (${bidder.domain})` : ""}'s bid of ` +
+      `${microToUsdc(bid.priceMicro)} on job ${job.jobId}, which assigns the job to them. ` +
+      `ACCEPTING REWRITES THE JOB'S BUDGET: it currently reads ${microToUsdc(job.budgetMicro)} and ` +
+      `will read ${microToUsdc(bid.priceMicro)} afterwards` +
+      (delta === 0
+        ? ` — the same number, because the bid matched the budget.`
+        : delta < 0
+          ? ` — ${microToUsdc(-delta)} less than posted.`
+          : ` — ${microToUsdc(delta)} MORE than you posted. Check that.`) +
+      ` Everything downstream reads the new figure, including escrow and release. ` +
+      `The losing bids are NOT swept and stay readable.`,
+    args: {
+      jobId: job.jobId,
+      bidderAgentId: input.bidderAgentId,
+      bidderDomain: bidder?.domain ?? null,
+      bidderAddress: bidder?.address ?? null,
+      budgetBeforeMicro: job.budgetMicro,
+      budgetBeforeUsdc: microToUsdc(job.budgetMicro),
+      budgetAfterMicro: bid.priceMicro,
+      budgetAfterUsdc: microToUsdc(bid.priceMicro),
+      budgetChangesTo: microToUsdc(bid.priceMicro),
+      pitchHash: bid.pitchHash,
+      competingBids: bids.length,
+      cheaperBidsNotTaken: bids.filter((b) => b.priceMicro < bid.priceMicro).length,
+    },
+    nextSteps: [
+      `Signing this sets job ${job.jobId}'s budget to ${microToUsdc(bid.priceMicro)}. If you have ` +
+        `already escrowed against the old figure, the difference does not move on its own.`,
+      `Ask the bidder for the pitch text behind ${bid.pitchHash} and check it hashes to that, before signing rather than after.`,
+      "Sign it with the wallet that holds `sender` — this package holds no key and cannot.",
+      "Submit the signed bytes to POST {algod}/v2/transactions.",
+    ],
+  });
+}
+
+/**
+ * Compose `rotate_address` — move an identity to a new controlling key.
+ *
+ * This is the recovery path, and without it a compromised key is TERMINAL.
+ * `new_agent` asserts one identity per address, so the owner of a stolen key
+ * can neither re-register nor reclaim: the agent id, and every score and job
+ * that references it, stays bound to a key somebody else holds. An identity you
+ * cannot move is an identity you cannot secure.
+ *
+ * The reverse index moves with it, which is the part that matters for anyone
+ * about to pay. `ad_<old key>` is DELETED, so **the old address stops resolving
+ * to this agent**. If it kept resolving, a caller running the obvious check —
+ * "does the address this card wants me to pay match the registry?" — would
+ * still get a match on the compromised key, and the rotation would have secured
+ * nothing.
+ *
+ * Only the CURRENT address may sign, so this is a race: it recovers a key you
+ * fear is exposed, and it is useless against one already being used against
+ * you. Rotate on suspicion, not on confirmation.
+ */
+export async function composeRotateAddress(
+  config: RiparConfig,
+  input: { sender: string; agentId: number; newAddress: string }
+): Promise<UnsignedTransaction> {
+  const appId = config.appIds.identity;
+  if (!appId) throw new Error("No IdentityRegistry app id for this network");
+
+  await assertMethodDeployed(
+    config,
+    appId,
+    CONTRACT_METHODS.rotate_address.signature,
+    `rotate_address exists in ripar-contracts/contracts/identity_registry.py and compiles, but the ` +
+      `live IdentityRegistry predates it, so THERE IS NO KEY RECOVERY ON CHAIN TODAY. What the ` +
+      `deployed contract does have is deregister_agent, which the current address can call to free ` +
+      `the domain and address boxes — after which a NEW agent id can be registered from a new ` +
+      `address. That loses the id, and every score and job that references it, which is exactly the ` +
+      `cost rotation exists to avoid. If the key is compromised, treat this as urgent: whoever holds ` +
+      `it can also deregister, and can do it first.`
+  );
+
+  // Validated before anything is composed: an invalid address would otherwise
+  // fail deep inside decodeAddress with a message about base32 checksums, and
+  // the caller's actual mistake is one wrong character in an address.
+  let newPublicKey: Uint8Array;
+  try {
+    newPublicKey = algosdk.decodeAddress(input.newAddress).publicKey;
+  } catch {
+    throw new Error(`newAddress is not a valid Algorand address: ${input.newAddress}`);
+  }
+
+  const registry = new RiparRegistry(config);
+  const agent = await registry.getAgent(input.agentId);
+  if (!agent) throw new Error(`No agent ${input.agentId} in the IdentityRegistry`);
+  if (agent.address !== input.sender) {
+    throw new Error(
+      `Agent ${input.agentId} is controlled by ${agent.address}, not ${input.sender}. Only the ` +
+        `current address may rotate — which is why rotation is a race against whoever has the key.`
+    );
+  }
+  if (agent.address === input.newAddress) {
+    throw new Error(
+      `${input.newAddress} is already agent ${input.agentId}'s controlling address. The contract ` +
+        `refuses a rotation to itself rather than succeeding silently, because succeeding silently ` +
+        `would hide a typo in the address you meant to move to.`
+    );
+  }
+  const alreadyUsed = await registry.resolveByAddress(input.newAddress);
+  if (alreadyUsed !== 0) {
+    throw new Error(
+      `${input.newAddress} already controls agent ${alreadyUsed}. The registry holds one identity ` +
+        `per address, so the destination has to be an address with no agent of its own.`
+    );
+  }
+
+  return composeAppCall(config, {
+    sender: input.sender,
+    appId,
+    signature: CONTRACT_METHODS.rotate_address.signature,
+    // An ARC-4 `address` is the bare 32-byte public key — no length prefix and
+    // not the 58-character base32 form a human reads.
+    encodedArgs: [uint64Bytes(input.agentId), newPublicKey],
+    boxes: [
+      { name: agentBoxName(input.agentId) },
+      // The OLD reverse index, which this call deletes...
+      { name: addressBoxName(agent.address) },
+      // ...and the NEW one, which it creates. Both must be declared: an
+      // undeclared box fails the call on an unavailable-box error that names
+      // neither box nor reason.
+      { name: addressBoxName(input.newAddress) },
+    ],
+    summary:
+      `Move agent ${input.agentId} (${agent.domain}) from ${agent.address} to ${input.newAddress} ` +
+      `on IdentityRegistry ${appId}. THE OLD ADDRESS STOPS RESOLVING: the ad_ box for ` +
+      `${agent.address} is deleted, so a caller checking "does the payee match the registry" gets a ` +
+      `MISS on the old key from the moment this confirms — which is the whole point, since a key ` +
+      `you are rotating away from is one you no longer trust. The agent id, its domain, and every ` +
+      `score and job referencing it are unchanged and stay with the identity. ` +
+      `Only ${agent.address} can sign this, so if the key is already being used against you, ` +
+      `whoever holds it can rotate first.`,
+    args: {
+      agentId: input.agentId,
+      domain: agent.domain,
+      oldAddress: agent.address,
+      newAddress: input.newAddress,
+      oldAddressStopsResolving: true,
+      idIsPreserved: true,
+      reputationFollowsTheId: true,
+    },
+    nextSteps: [
+      "Sign it with the wallet that holds the OLD address — it is the only key the contract accepts, and it is also the key you are retiring.",
+      "Submit the signed bytes to POST {algod}/v2/transactions.",
+      `Then re-check with ripar_get_agent: ${input.newAddress} must resolve to agent ${input.agentId} and ${agent.address} must resolve to nothing.`,
+      `Update the agent card at https://${agent.domain}/.well-known/agent.json — its x402 payTo still names ${agent.address}, and until it changes the card and the registry disagree about who to pay. ripar_agent_health reports exactly that mismatch.`,
     ],
   });
 }

@@ -100,6 +100,33 @@ export function parseChallenge(body: unknown): X402Challenge | null {
 }
 
 /**
+ * Pull a challenge out of a 402 from EITHER place it is allowed to live.
+ *
+ * x402 v2 carries the requirements in a `payment-required` response header as
+ * base64 JSON, and a server that does so may then send an empty body — Ripar's
+ * own live agent at api.ripar.io does exactly that, answering
+ * `402 payment-required: eyJ4NDAyVmVyc2lvbiI6Mi…` with a body of `{}`.
+ *
+ * Reading only the body reports those as "402 with no readable accepts list",
+ * which is a finding about a completely correct server, and one that would push
+ * a caller to guess a price. The header is checked FIRST because when both are
+ * present it is the normative copy.
+ */
+export function challengeFromResponse(
+  res: Pick<Response, "headers">,
+  body: unknown
+): (X402Challenge & { from: "header" | "body" }) | null {
+  const header = res.headers?.get?.("payment-required");
+  if (header) {
+    const decoded = decodeMaybeBase64Json(header);
+    const parsed = typeof decoded === "string" ? null : parseChallenge(decoded);
+    if (parsed) return { ...parsed, from: "header" };
+  }
+  const fromBody = parseChallenge(body);
+  return fromBody ? { ...fromBody, from: "body" } : null;
+}
+
+/**
  * Format an atomic amount for a human.
  *
  * Only USDC's 6 decimals are assumed, and only when the asset actually looks
@@ -166,7 +193,7 @@ export async function quoteEndpoint(url: string, opts: QuoteOptions = {}): Promi
       };
     }
 
-    const challenge = parseChallenge(raw);
+    const challenge = challengeFromResponse(res, raw);
     if (!challenge) {
       return {
         url,
@@ -175,9 +202,16 @@ export async function quoteEndpoint(url: string, opts: QuoteOptions = {}): Promi
         status: 402,
         price: null,
         accepts: [],
-        warnings: ["the endpoint sent a 402 but its body has no readable `accepts` list"],
+        warnings: [
+          "the endpoint sent a 402 with no readable requirements — nothing in the `payment-required` header and nothing in the body",
+        ],
         raw,
       };
+    }
+    if (challenge.from === "header") {
+      warnings.push(
+        "the requirements came from the `payment-required` header rather than the body, which is the x402 v2 shape"
+      );
     }
 
     // Cheapest first. Ties keep the server's own ordering, which is its preference.
@@ -264,7 +298,10 @@ export async function callEndpoint(url: string, opts: CallOptions = {}): Promise
     const body = await readJsonish(res);
 
     if (res.status === 402) {
-      const challenge = parseChallenge(body);
+      // Same both-places read as the quote path: a caller that got a 402 with
+      // an empty body and a header full of requirements must not be told there
+      // is nothing to pay.
+      const challenge = challengeFromResponse(res, body);
       const quote = challenge
         ? await Promise.resolve(challengeToQuote(url, method, challenge, opts.network ?? "testnet"))
         : null;

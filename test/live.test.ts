@@ -24,13 +24,17 @@ import {
   composePostJob,
   composeRefundEscrow,
   composeReleaseEscrow,
+  composeRotateAddress,
 } from "../src/unsigned.js";
+import { MethodNotDeployedError, deploymentReport, isMethodDeployed } from "../src/deployed.js";
+import { agentHealth } from "../src/health.js";
 import algosdk from "algosdk";
 
 const skip = process.env.RIPAR_SKIP_LIVE === "1";
 const describeLive = skip ? describe.skip : describe;
 
 const registry = new RiparRegistry();
+const APPS = REGISTRY_APP_IDS.testnet;
 
 describeLive("live TestNet registries", () => {
   it("reads agent_count out of IdentityRegistry 768572968", async () => {
@@ -238,5 +242,89 @@ describeLive("live TestNet registries", () => {
 
     // Signing is somebody else's job — the blob must carry no signature.
     expect(tx.unsignedTxnBase64).not.toContain("sig");
+  });
+
+  // -------------------------------------------------------------------------
+  // What is on chain versus what is in ripar-contracts.
+  //
+  // These read the REAL approval programs. They are the tests that notice the
+  // day a registry with bidding and rotation is finally deployed: the "not
+  // deployed yet" assertions below start failing, which is the correct alarm —
+  // the tools would begin working and every description saying "NOT DEPLOYED"
+  // would have become a lie.
+  // -------------------------------------------------------------------------
+
+  it("confirms the live registries still route the methods this package composes", async () => {
+    for (const [appId, signature] of [
+      [APPS.validation, "post_job(byte[],uint64,uint64)uint64"],
+      [APPS.validation, "fund_job(axfer,uint64)uint64"],
+      [APPS.validation, "release_escrow(uint64)uint64"],
+      [APPS.validation, "refund_escrow(uint64)uint64"],
+      [APPS.identity, "agent_address(uint64)address"],
+    ] as const) {
+      expect(
+        await isMethodDeployed(registry.config, appId, signature),
+        `${signature} on ${appId}`
+      ).toBe(true);
+    }
+  });
+
+  it("confirms bidding and rotation are STILL not on chain, and refuses accordingly", async () => {
+    const report = await deploymentReport(registry.config);
+    const byName = Object.fromEntries(report.methods.map((m) => [m.name, m]));
+
+    // If any of these flip to true, a newer generation was deployed: update
+    // CONTRACT_METHODS[].deployed, and re-read every tool description that says
+    // NOT DEPLOYED, because they will have stopped being true.
+    expect(byName.place_bid!.onChain, "place_bid").toBe(false);
+    expect(byName.accept_bid!.onChain, "accept_bid").toBe(false);
+    expect(byName.rotate_address!.onChain, "rotate_address").toBe(false);
+
+    // ...and the composer refuses rather than handing back a doomed transaction.
+    const agent = (await registry.listAgents(1))[0]!;
+    await expect(
+      composeRotateAddress(registry.config, {
+        sender: agent.address,
+        agentId: agent.agentId,
+        newAddress: "7777777777777777777777777777777777777777777777777774MSJUVU",
+      })
+    ).rejects.toBeInstanceOf(MethodNotDeployedError);
+  });
+
+  it("reads an empty bid list off the live registry, because bd_ boxes cannot exist on it", async () => {
+    const jobs = await registry.listJobs({ limit: 1 });
+    if (!jobs.length) return;
+    expect(await registry.listBids(jobs[0]!.jobId)).toEqual([]);
+  });
+
+  it("checks a real registered agent over real HTTP", async () => {
+    const agents = await registry.listAgents(10);
+    const agent = agents[0]!;
+    const report = await agentHealth(registry.config, { agentId: agent.agentId }, { registry });
+
+    // The verdict depends on whether somebody's Vercel deployment is up right
+    // now, so this asserts on the SHAPE and on the one rule that must hold
+    // whatever the network did: an unreachable agent is never reported as
+    // healthy, and a check that did not run is never a pass.
+    expect(["healthy", "degraded", "failing", "unreachable"]).toContain(report.verdict);
+    expect(report.agent.agentId).toBe(agent.agentId);
+    expect(report.checks.map((c) => c.id).sort()).toEqual([
+      "card_agent_id_resolves",
+      "card_payto_matches_registry",
+      "card_reachable",
+      "health_endpoint",
+      "serves_402",
+    ]);
+    for (const check of report.checks) {
+      expect(["pass", "fail", "unknown", "skip"]).toContain(check.status);
+      expect(check.detail.length).toBeGreaterThan(20);
+    }
+    if (report.verdict === "unreachable") {
+      expect(report.checks.some((c) => c.status === "pass")).toBe(false);
+      expect(report.summary).toMatch(/UNREACHABLE/);
+    }
+    if (report.verdict === "healthy") {
+      expect(report.checks.every((c) => c.status === "pass")).toBe(true);
+    }
   });
 });

@@ -1,28 +1,42 @@
 /**
- * The ten tools, defined as data.
+ * The tools, defined as data.
  *
  * Keeping the specs in a plain array — rather than inline in `registerTool`
  * calls — means the schemas can be asserted on directly, an A2A card can list
  * the tool names without starting a server, and a bad tool definition fails a
  * test instead of failing silently in a client that just... doesn't show it.
  *
- * The read/write split is the important thing here. Six tools read the chain
- * and are marked `readOnlyHint`. Three compose a transaction and return it
+ * The read/write split is the important thing here. Eight tools read the chain
+ * (or, for `ripar_agent_health`, the chain and the agent's own HTTP endpoints)
+ * and are marked `readOnlyHint`. Six compose a transaction and return it
  * UNSIGNED. One (`ripar_call_endpoint`) can spend money, but only with a
  * payment header the caller supplies, because this process has no key. A client
- * is entitled to show a confirmation prompt for those last four and nothing
+ * is entitled to show a confirmation prompt for those last seven and nothing
  * else, and the annotations say so honestly.
+ *
+ * Three of the compose tools — `ripar_place_bid`, `ripar_accept_bid` and
+ * `ripar_rotate_address` — target methods that exist in ripar-contracts and are
+ * NOT on the live registries, which ran out of deployment budget mid-generation.
+ * They do not pretend otherwise and they do not fail obscurely: each one reads
+ * the target app's approval program for the method's selector before composing,
+ * and refuses with what the deployed contract does offer instead. See
+ * `src/deployed.ts`.
  */
 
 import { z } from "zod";
 import { microToUsdc, type RiparRegistry } from "../registry.js";
 import type { RiparConfig } from "../config.js";
 import {
+  composeAcceptBid,
   composeFundJob,
+  composePlaceBid,
   composePostJob,
   composeRefundEscrow,
   composeReleaseEscrow,
+  composeRotateAddress,
 } from "../unsigned.js";
+import { agentHealth } from "../health.js";
+import { CONTRACT_METHODS, isMethodDeployed } from "../deployed.js";
 import { callEndpoint, quoteEndpoint } from "../x402.js";
 import { SKILLS, skillPriceUsdc, skillInputJsonSchema } from "../skills.js";
 import { JOB_STATUS } from "../config.js";
@@ -442,6 +456,262 @@ export const TOOLS: RiparToolSpec[] = [
       return args.action === "refund"
         ? composeRefundEscrow(config, { sender: args.sender, jobId: args.jobId })
         : composeReleaseEscrow(config, { sender: args.sender, jobId: args.jobId });
+    },
+  },
+  {
+    name: "ripar_list_bids",
+    title: "Read every bid on a job",
+    description:
+      "Read every `bd_` box for one job off the ValidationRegistry and decode it: the bidding " +
+      "agent, the price they will do it for, a hash of their pitch, and when it was placed. " +
+      "Cheapest first. " +
+      "THE PITCH TEXT IS NOT ON CHAIN — only a 32-byte commitment to it — so a bid tells you a " +
+      "price and proves nothing about the words behind it until the bidder shows you text that " +
+      "hashes to the same digest. " +
+      "LOSING BIDS ARE KEPT DELIBERATELY. accept_bid does not sweep the boxes it rejected, because " +
+      "a board that erases what it turned down cannot be checked afterwards — 'we took the " +
+      "cheapest' should be verifiable against the ones that lost. So a bid appearing here does not " +
+      "mean it is still live: check the job's status. Only bids on an OPEN job can be accepted. " +
+      "Bidding is NOT DEPLOYED on the live ValidationRegistry (768572979), which predates place_bid, " +
+      "so on that registry this returns an empty list and says why. That is a real read of a real " +
+      "chain, not a stub.",
+    inputShape: {
+      jobId: z.number().int().positive().describe("The job whose bids you want"),
+      limit: z.number().int().min(1).max(100).default(50).describe("Maximum bids to return"),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    async run(args, { registry, config }) {
+      const appId = config.appIds.validation;
+      // Read the chain for whether bidding exists here, rather than trusting a
+      // constant — a caller pointed at a newer registry gets the truth about
+      // THAT one.
+      const [job, bids, biddingLive] = await Promise.all([
+        registry.getJob(args.jobId),
+        registry.listBids(args.jobId, args.limit ?? 50).catch(() => [] as never[]),
+        isMethodDeployed(config, appId, CONTRACT_METHODS.place_bid.signature).catch(() => false),
+      ]);
+
+      if (!job) return { found: false, reason: `no job ${args.jobId} in the registry` };
+
+      const decorated = bids.map((b) => ({
+        ...b,
+        priceUsdc: microToUsdc(b.priceMicro),
+        placedAtIso: b.placedAt > 0 ? new Date(b.placedAt * 1000).toISOString() : null,
+        // The client can still accept only while the job is OPEN; every other
+        // status makes a listed bid history rather than an offer.
+        stillAcceptable: job.status === "open",
+        undercutsBudget: b.priceMicro < job.budgetMicro,
+      }));
+
+      return {
+        network: config.network,
+        validationApp: appId,
+        job: {
+          jobId: job.jobId,
+          status: job.status,
+          client: job.client,
+          budgetMicro: job.budgetMicro,
+          budgetUsdc: microToUsdc(job.budgetMicro),
+          serverAgentId: job.serverAgentId,
+        },
+        biddingDeployed: biddingLive,
+        count: decorated.length,
+        bids: decorated,
+        notes: [
+          biddingLive
+            ? "place_bid is routed by this app's approval program, so bids are real here."
+            : `place_bid is NOT in app ${appId}'s approval program. Bidding exists in ` +
+              `ripar-contracts/contracts/validation_registry.py but this registry predates it, so no bd_ ` +
+              `box exists or can exist on it and an empty list is the only honest answer. Jobs get ` +
+              `assigned here by the client naming an agent directly.`,
+          "Losing bids are NOT swept when one is accepted — that is deliberate, so the choice stays checkable.",
+          "The pitch text is off chain. Ask the bidder for it and check it hashes to pitchHash before you rely on it.",
+          job.status === "open"
+            ? "This job is open, so any bid here can still be accepted."
+            : `This job is ${job.status}, so these are a record of what was offered, not live offers.`,
+        ],
+      };
+    },
+  },
+
+  {
+    name: "ripar_agent_health",
+    title: "Check an agent is alive and is who the registry says",
+    description:
+      "The check to run before paying a stranger. Fetches the agent's real /.well-known/agent.json " +
+      "and its /health endpoint over HTTP, then answers four things the chain cannot: is anything " +
+      "actually running there; does the card's x402 payTo match the address the IdentityRegistry " +
+      "holds; does the agent id the card claims resolve back to this same domain; and does its " +
+      "priced endpoint really answer 402 to an unpaid request. " +
+      "Every finding comes from a request that was actually made — there are no fixtures and no " +
+      "cached verdicts. AN UNREACHABLE AGENT IS REPORTED AS UNREACHABLE, never as a pass and never " +
+      "as agreement: `verdict` distinguishes healthy, degraded (up, nothing wrong, something " +
+      "unverifiable), failing (it answered and was WRONG), and unreachable (nothing answered, so " +
+      "nothing was checked). A payTo or agent-id mismatch is the failure that costs money — it is " +
+      "what a copied card with the payee swapped looks like — and the report says so in words.",
+    inputShape: {
+      agentId: z.number().int().positive().optional().describe("Registry id of the agent"),
+      domain: z.string().min(1).optional().describe("Its registered domain, if you have no id"),
+      address: z.string().length(58).optional().describe("Its Algorand address, if you have no id"),
+      timeoutMs: z
+        .number()
+        .int()
+        .min(1000)
+        .max(30000)
+        .default(10000)
+        .describe("Per-request timeout. A slow agent is not a healthy one, but it is not a liar either."),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    async run(args, { registry, config }) {
+      return agentHealth(
+        config,
+        { agentId: args.agentId, domain: args.domain, address: args.address },
+        { registry, timeoutMs: args.timeoutMs ?? 10_000 }
+      );
+    },
+  },
+
+  {
+    name: "ripar_place_bid",
+    title: "Compose a bid on a job (unsigned)",
+    description:
+      "Compose a ValidationRegistry place_bid call and return it UNSIGNED. You give the pitch as " +
+      "TEXT and it is hashed here; only the 32-byte digest goes on chain and THE TEXT STAYS OFF " +
+      "CHAIN. That is deliberate — a bid board holding prose would put every agent's sales copy " +
+      "into permanent paid box storage and still could not prove the client read the pitch that was " +
+      "bid under, whereas a hash proves exactly that for 32 bytes. Keep the text: nothing, including " +
+      "this tool, can recover it from the registry, and a commitment you cannot open commits you to " +
+      "nothing. " +
+      "Only the bidding agent's own address may bid, only while the job is OPEN, and a second bid " +
+      "from the same agent REPLACES the first — all three are checked against the chain here so an " +
+      "impossible bid fails for free instead of for a fee. " +
+      "place_bid is NOT DEPLOYED on the live registry: it exists in ripar-contracts and compiles, " +
+      "but 768572979 predates it. This tool reads that app's approval program before composing " +
+      "anything and refuses with an explanation rather than handing back a transaction the router " +
+      "will reject. Nothing is submitted and no key is used or held.",
+    inputShape: {
+      sender: z
+        .string()
+        .length(58)
+        .describe("The bidding agent's own controlling address — the contract accepts no other"),
+      jobId: z.number().int().positive().describe("The job being bid on. It must still be open."),
+      bidderAgentId: z.number().int().positive().describe("Your registry id"),
+      priceMicro: z
+        .number()
+        .int()
+        .positive()
+        .describe("What you will do it for, in USDC base units — 400000 is $0.40"),
+      pitch: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Your pitch, as text. Hashed here and never transmitted. Give this OR pitchHash."),
+      pitchHash: z
+        .string()
+        .optional()
+        .describe("Hex of a 32-byte sha256 digest you made yourself. Give this OR pitch, not both."),
+    },
+    annotations: {
+      readOnlyHint: false,
+      openWorldHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+    },
+    async run(args, { config }) {
+      return composePlaceBid(config, {
+        sender: args.sender,
+        jobId: args.jobId,
+        bidderAgentId: args.bidderAgentId,
+        priceMicro: args.priceMicro,
+        pitch: args.pitch,
+        pitchHash: args.pitchHash,
+      });
+    },
+  },
+
+  {
+    name: "ripar_accept_bid",
+    title: "Compose an accept-bid transaction (unsigned)",
+    description:
+      "Compose a ValidationRegistry accept_bid call and return it UNSIGNED. " +
+      "ACCEPTING A BID REWRITES THE JOB'S BUDGET TO THE BID PRICE. That is the single most " +
+      "important thing about this call: a job posted at 1.0 USDC and accepted at a bid of 0.4 reads " +
+      "0.4 afterwards, and everything downstream — escrow, release, what the assignee is owed — uses " +
+      "the new number. The contract does it that way on purpose, because leaving the old figure " +
+      "would let the job, the escrow and any release disagree about what was actually agreed. The " +
+      "response states the before and after explicitly so you sign knowing which number survives. " +
+      "It also assigns the job in the same call: there is no separate assign step and no window " +
+      "where the job is assigned at the old price. Losing bids are not swept and stay readable. " +
+      "Client-only and open-jobs-only, both checked against the chain first. " +
+      "accept_bid is NOT DEPLOYED on the live registry — this reads 768572979's approval program " +
+      "and refuses clearly rather than composing a call its router cannot dispatch. Nothing is " +
+      "submitted and no key is used or held.",
+    inputShape: {
+      sender: z.string().length(58).describe("The job's client — the only address that may accept"),
+      jobId: z.number().int().positive().describe("The job whose bid you are accepting"),
+      bidderAgentId: z
+        .number()
+        .int()
+        .positive()
+        .describe("Registry id of the agent whose bid you are taking, from ripar_list_bids"),
+    },
+    annotations: {
+      readOnlyHint: false,
+      openWorldHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+    },
+    async run(args, { config }) {
+      return composeAcceptBid(config, {
+        sender: args.sender,
+        jobId: args.jobId,
+        bidderAgentId: args.bidderAgentId,
+      });
+    },
+  },
+
+  {
+    name: "ripar_rotate_address",
+    title: "Compose a key rotation for an agent (unsigned)",
+    description:
+      "Compose an IdentityRegistry rotate_address call and return it UNSIGNED. This is the recovery " +
+      "path for a compromised or lost key, and it matters because without it a bad key is TERMINAL: " +
+      "new_agent allows one identity per address, so the owner can neither re-register nor reclaim, " +
+      "and the agent id — with every reputation score and job that references it — stays bound to a " +
+      "key somebody else may hold. An identity you cannot move is an identity you cannot secure. " +
+      "THE OLD ADDRESS STOPS RESOLVING. The reverse index moves with the identity: the `ad_` box for " +
+      "the old key is deleted, so from the moment this confirms, a caller running the obvious check " +
+      "— does the payee match the registry — gets a MISS on the old address. That is the entire " +
+      "point; if the old key kept resolving, the rotation would have secured nothing. " +
+      "The id, the domain and the reputation are preserved and follow the identity. " +
+      "Only the CURRENT address may sign, so this is a race: it rescues a key you fear is exposed " +
+      "and is useless against one already in use against you — whoever holds it can rotate first. " +
+      "rotate_address is NOT DEPLOYED on the live IdentityRegistry (768572968). This reads that " +
+      "app's approval program before composing and refuses with what the deployed contract does " +
+      "offer instead. Nothing is submitted and no key is used or held.",
+    inputShape: {
+      sender: z
+        .string()
+        .length(58)
+        .describe("The agent's CURRENT controlling address — the only key the contract accepts"),
+      agentId: z.number().int().positive().describe("The agent being moved"),
+      newAddress: z
+        .string()
+        .length(58)
+        .describe("The address taking control. It must not already control an agent."),
+    },
+    annotations: {
+      readOnlyHint: false,
+      openWorldHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+    },
+    async run(args, { config }) {
+      return composeRotateAddress(config, {
+        sender: args.sender,
+        agentId: args.agentId,
+        newAddress: args.newAddress,
+      });
     },
   },
 ];

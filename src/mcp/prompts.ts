@@ -181,6 +181,81 @@ it is, because that agent alone will decide whether the work passed.`
    client and the window has not closed yet, tell me to wait rather than to sign — signing early
    burns a fee for a transaction the contract will reject.`,
   },
+
+  {
+    name: "recover_compromised_key",
+    title: "Recover an agent whose key is compromised",
+    description:
+      "Move an agent identity to a new controlling address before whoever has the old key uses it " +
+      "— and then check that the old address really has stopped resolving, which is the part that " +
+      "makes the rotation worth anything.",
+    argsShape: {
+      agent: z.string().describe("The agent whose key is at risk — id, domain, or address"),
+      newAddress: z
+        .string()
+        .optional()
+        .describe("The address taking control, if you have already generated one"),
+    },
+    tools: ["ripar_get_agent", "ripar_rotate_address", "ripar_agent_health", "ripar_search_agents"],
+    render: (a) => `Agent "${a.agent}" may have a compromised key. Walk me through moving it, and be
+blunt about what is at stake at each step. I will sign; you compose.
+
+FIRST, the thing that decides everything else: rotation is a RACE. Only the current address may sign
+a rotation, and whoever holds a stolen key holds that same power — they can rotate to themselves, or
+deregister the agent outright, and either way the identity is gone. So the order below is "act, then
+verify", not "investigate, then act". If I hesitate, say this again.
+
+1. ripar_get_agent on "${a.agent}" — confirm the id, the domain, and the address the registry
+   currently holds. That address is the key we are retiring. If nothing resolves, stop: there is no
+   on-chain identity to move and everything below would be about a stranger.
+
+2. Check I have a destination. ${
+      a.newAddress
+        ? `I said ${a.newAddress}. Before composing anything, run ripar_search_agents on that address:
+   the registry allows one identity per address, so if it already controls an agent the rotation is
+   refused. Tell me if it does.`
+        : `I have not given you one. Tell me to generate a fresh Algorand account in a wallet I
+   control and paste the address — and tell me NOT to reuse an address that already controls an
+   agent, because the registry holds one identity per address and the contract refuses it.`
+    } Say plainly that this new key is now the only thing between me and losing the identity, so it
+   should not live where the old one did.
+
+3. ripar_rotate_address — compose it: sender is the CURRENT address, agentId from step 1, newAddress
+   from step 2. Read the summary back and make sure I have understood two things:
+
+     - The agent id, the domain, and every reputation score and job referencing that id are
+       PRESERVED. Reputation follows the identity, not the key. That is why rotating beats
+       deregistering and re-registering, which strands all of it.
+     - THE OLD ADDRESS STOPS RESOLVING. The reverse index moves with the identity, so the old
+       address resolves to nothing the moment this confirms, and anyone checking "does the payee
+       match the registry" gets a miss on the old key from then on. That is the entire point: if the
+       old address kept resolving, the rotation would have secured nothing.
+
+   This may come back REFUSED, saying rotate_address is not in the deployed IdentityRegistry's
+   approval program. That is a true answer about the live chain, not a bug — the method exists in
+   ripar-contracts and compiles, but the deployed registry predates it. If it happens, give me the
+   refusal verbatim and then the real position: the deployed contract has deregister_agent, which
+   frees the domain and address boxes so a NEW id can be registered from a new address — at the cost
+   of the id and everything attached to it. Do not dress that up as equivalent. And tell me the
+   compromised key can call deregister too, so it is still a race.
+
+4. Remind me this is unsigned. It has to be signed by the OLD key, the one I am retiring, because
+   that is the only key the contract accepts — and this server holds no key and submits nothing.
+
+5. After I tell you it confirmed, verify rather than assume. Two reads with ripar_get_agent:
+     - the NEW address must resolve to the same agent id;
+     - the OLD address must resolve to NOTHING. If it still resolves, the rotation did not land and
+       I should assume the old key is still live.
+
+6. ripar_agent_health on the agent — this is the step people skip. The registry now says one thing
+   and the agent card served at the domain still says another: its x402 payTo names the OLD address
+   until somebody edits the card. Until then, a caller who checks the card against the registry sees
+   a mismatch, and a caller who does not check pays the compromised key. The health report flags
+   exactly that. Tell me to update the card and what to change it to.
+
+Finish with what is still exposed: the old key can no longer act as this agent, but anything else it
+controls — funds, other identities — is untouched by this, and I have to move those separately.`,
+  },
 ];
 
 /** Every tool name any prompt tells the model to call. Asserted against TOOL_NAMES. */

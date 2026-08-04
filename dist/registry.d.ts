@@ -6,7 +6,7 @@
  * call throws — an agent acting on a fabricated reputation score is worse than
  * an agent that knows it could not check.
  */
-import { type Agent, type Job, type Score } from "./abi.js";
+import { type Agent, type Bid, type Job, type Score } from "./abi.js";
 import { type RiparConfig, type RiparConfigInput } from "./config.js";
 export declare class RiparReadError extends Error {
     readonly code: "not_found" | "network" | "bad_response" | "no_registry";
@@ -34,7 +34,14 @@ export declare class RiparRegistry {
      * list: a short answer that looks complete is the one failure mode this
      * package exists to avoid.
      */
-    listBoxNames(appId: number, prefix: string, pageSize?: number, maxPages?: number): Promise<Uint8Array[]>;
+    listBoxNames(appId: number, 
+    /**
+     * A text prefix like `ag_`, or raw bytes when the key is not text —
+     * `bd_` + itob(job_id) selects one job's bids and those 8 bytes are not
+     * UTF-8. Encoding them as text would mangle every byte above 0x7f and the
+     * filter would silently match nothing.
+     */
+    prefix: string | Uint8Array, pageSize?: number, maxPages?: number): Promise<Uint8Array[]>;
     /**
      * Several global-state uints from ONE request. Reading them one at a time
      * would fetch the whole application record — approval program included —
@@ -66,6 +73,28 @@ export declare class RiparRegistry {
         agentId?: number;
         limit?: number;
     }): Promise<Job[]>;
+    /**
+     * Every bid on one job, cheapest first.
+     *
+     * One server-side-filtered listing over `bd_` + itob(job_id), then a read per
+     * box. The composite key is what makes that possible: the job id is the first
+     * half, so algod's `prefix=` does the selection and this never sees a bid on
+     * another job.
+     *
+     * **Losing bids are kept deliberately.** `accept_bid` does NOT sweep the
+     * boxes it rejected — a board that erases what it turned down cannot be
+     * checked afterwards, and "we picked the cheapest" is a claim you should be
+     * able to verify against the ones that lost. So a bid appearing here does not
+     * mean it is live: read the JOB's status alongside. Only a bid on an OPEN job
+     * can still be accepted, and only the bidder can remove their own.
+     *
+     * An empty list is a real answer, and on the CURRENTLY DEPLOYED
+     * ValidationRegistry (768572979) it is the only answer this can give: that
+     * app predates `place_bid`, so no `bd_` box exists or can exist on it. See
+     * `deployed.ts` — the reads here are honest either way, and it is the WRITE
+     * path that has to refuse.
+     */
+    listBids(jobId: number, limit?: number): Promise<Bid[]>;
     /**
      * What is actually held for a job, in base units. 0 when nothing is.
      *

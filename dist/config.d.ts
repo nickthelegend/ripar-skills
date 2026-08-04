@@ -68,6 +68,20 @@ export declare const BOX_PREFIX: {
      * the escrow is paid out, and never creates it for a job nobody funded.
      */
     readonly escrow: "es_";
+    /**
+     * ValidationRegistry: `bd_` + itob(job_id) + itob(bidder_agent_id) — a
+     * 16-byte composite key, not one id. The job id comes FIRST so that every
+     * bid on one job shares a byte prefix and algod can filter the listing
+     * server-side.
+     *
+     * NOT DEPLOYED on 768572979. place_bid/accept_bid/withdraw_bid exist in
+     * `ripar-contracts/contracts/validation_registry.py` and compile, but the
+     * live ValidationRegistry predates them, so this prefix currently matches
+     * zero boxes on chain. That is a real, checkable answer — an empty bid list
+     * on a live registry — and `src/deployed.ts` is what stops a WRITE against
+     * the same missing methods being composed at all.
+     */
+    readonly bid: "bd_";
 };
 /**
  * Job lifecycle, copied from the constants at the top of

@@ -21,12 +21,29 @@ const REQUIRED_TOOLS = [
   "ripar_get_agent",
   "ripar_get_reputation",
   "ripar_list_jobs",
+  "ripar_list_bids",
+  "ripar_agent_health",
   "ripar_post_job",
   "ripar_fund_job",
   "ripar_settle_escrow",
+  "ripar_place_bid",
+  "ripar_accept_bid",
+  "ripar_rotate_address",
   "ripar_quote_endpoint",
   "ripar_call_endpoint",
   "ripar_settlements",
+] as const;
+
+/** Every tool that only observes — chain, or in one case chain plus real HTTP. */
+const READ_ONLY_TOOLS = [
+  "ripar_search_agents",
+  "ripar_get_agent",
+  "ripar_get_reputation",
+  "ripar_list_jobs",
+  "ripar_list_bids",
+  "ripar_agent_health",
+  "ripar_settlements",
+  "ripar_quote_endpoint",
 ] as const;
 
 const props = (name: string) =>
@@ -34,7 +51,7 @@ const props = (name: string) =>
 const required = (name: string) => (toolJsonSchema(getTool(name)!).required ?? []) as string[];
 
 describe("the tool set", () => {
-  it("exposes exactly the ten advertised tools", () => {
+  it("exposes exactly the advertised tools", () => {
     expect([...TOOL_NAMES].sort()).toEqual([...REQUIRED_TOOLS].sort());
   });
 
@@ -52,27 +69,29 @@ describe("the tool set", () => {
 });
 
 describe("read/write annotations", () => {
-  it("marks the six chain reads read-only", () => {
-    for (const name of [
-      "ripar_search_agents",
-      "ripar_get_agent",
-      "ripar_get_reputation",
-      "ripar_list_jobs",
-      "ripar_settlements",
-      "ripar_quote_endpoint",
-    ]) {
+  it("marks every observing tool read-only", () => {
+    for (const name of READ_ONLY_TOOLS) {
       expect(getTool(name)!.annotations.readOnlyHint, name).toBe(true);
     }
   });
 
-  it("does NOT mark the four tools that can move money or state read-only", () => {
-    // A client is entitled to prompt for confirmation on exactly these.
-    for (const name of [
-      "ripar_call_endpoint",
-      "ripar_post_job",
-      "ripar_fund_job",
-      "ripar_settle_escrow",
-    ]) {
+  it("does NOT mark the tools that can move money or state read-only", () => {
+    // A client is entitled to prompt for confirmation on exactly these — and on
+    // nothing else, which is why this is the complement of READ_ONLY_TOOLS
+    // rather than a second hand-maintained list that could drift out of it.
+    const writes = TOOL_NAMES.filter((n) => !READ_ONLY_TOOLS.includes(n as never));
+    expect(writes.sort()).toEqual(
+      [
+        "ripar_accept_bid",
+        "ripar_call_endpoint",
+        "ripar_fund_job",
+        "ripar_place_bid",
+        "ripar_post_job",
+        "ripar_rotate_address",
+        "ripar_settle_escrow",
+      ].sort()
+    );
+    for (const name of writes) {
       expect(getTool(name)!.annotations.readOnlyHint, name).toBe(false);
     }
   });
@@ -198,10 +217,12 @@ describe("toolCatalogue", () => {
   it("mirrors the tool set, for embedding in an A2A card", () => {
     const catalogue = toolCatalogue();
     expect(catalogue.map((t) => t.name)).toEqual(TOOL_NAMES);
-    expect(catalogue.filter((t) => t.readOnly)).toHaveLength(6);
-    // Six reads and four that compose or spend: a client showing a
-    // confirmation prompt for the second group is showing it for four things.
-    expect(catalogue.filter((t) => !t.readOnly)).toHaveLength(4);
+    expect(catalogue.filter((t) => t.readOnly)).toHaveLength(READ_ONLY_TOOLS.length);
+    // The rest compose or spend: a client showing a confirmation prompt for the
+    // second group is showing it for exactly these.
+    expect(catalogue.filter((t) => !t.readOnly)).toHaveLength(
+      TOOL_NAMES.length - READ_ONLY_TOOLS.length
+    );
   });
 });
 
@@ -218,7 +239,7 @@ async function connect(registry?: RiparRegistry) {
 }
 
 describe("the MCP server over an in-memory transport", () => {
-  it("lists all ten tools with their schemas", async () => {
+  it("lists every tool with its schema", async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([...REQUIRED_TOOLS].sort());

@@ -124,13 +124,17 @@ describe("quoteEndpoint", () => {
     expect(quote.price!.amountDisplay).toBe("50000 base units of 999999999");
   });
 
-  it("says so when a 402 arrives with an unreadable body", async () => {
+  it("says so when a 402 arrives with nothing readable in EITHER place", async () => {
     const quote = await quoteEndpoint("https://paid.example/run", {
       fetch: respond({ error: "pay up" }),
     });
     expect(quote.paymentRequired).toBe(true);
     expect(quote.price).toBeNull();
-    expect(quote.warnings.join(" ")).toMatch(/no readable `accepts`/);
+    // The warning has to name both places it looked, or a caller debugging a
+    // header-carried challenge will not know the header was checked at all.
+    expect(quote.warnings.join(" ")).toMatch(/no readable requirements/);
+    expect(quote.warnings.join(" ")).toMatch(/payment-required.*header/);
+    expect(quote.warnings.join(" ")).toMatch(/body/);
   });
 });
 
