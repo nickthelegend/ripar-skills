@@ -1,0 +1,149 @@
+/**
+ * Everything about *where* the chain is, in one file.
+ *
+ * The three registries below are deployed and live on Algorand TestNet. They are
+ * not fixtures — every app id here resolves on a public explorer, and the box
+ * reads in `registry.ts` hit them directly. Nothing in this package fabricates
+ * a number; if a read fails you get an error, never a plausible-looking zero.
+ */
+
+export type Network = "testnet" | "mainnet";
+
+/** The three Ripar registries. TestNet is the only network they exist on today. */
+export const REGISTRY_APP_IDS = {
+  testnet: {
+    identity: 768547159,
+    // v2. v1 (768547170) took the payment id and amount as arguments and only
+    // checked the id was 32 bytes and unseen, so a score could be minted from
+    // bytes. This one reads them off the settling transfer itself.
+    reputation: 768559198,
+    validation: 768547172,
+  },
+} as const satisfies Record<"testnet", Record<string, number>>;
+
+export type RegistryName = keyof (typeof REGISTRY_APP_IDS)["testnet"];
+
+/**
+ * AlgoNode's public endpoints. No API key, CORS open — which is why this package
+ * has no credential story at all: it reads what anyone can read.
+ */
+export const ENDPOINTS = {
+  testnet: {
+    algod: "https://testnet-api.algonode.cloud",
+    indexer: "https://testnet-idx.algonode.cloud",
+    explorer: "https://testnet.explorer.perawallet.app",
+  },
+  mainnet: {
+    algod: "https://mainnet-api.algonode.cloud",
+    indexer: "https://mainnet-idx.algonode.cloud",
+    explorer: "https://explorer.perawallet.app",
+  },
+} as const satisfies Record<Network, { algod: string; indexer: string; explorer: string }>;
+
+/**
+ * CAIP-2 network ids as x402 uses them.
+ *
+ * These are the TRUNCATED genesis hashes: CAIP-2 caps a network reference at 32
+ * characters, so the id is the first 32 chars of the base64 genesis hash rather
+ * than the whole thing. Some facilitators advertise the full hash instead, so
+ * comparisons against a facilitator's `/supported` output must be prefix-based,
+ * not equality. Values mirror `@x402/avm`'s constants; kept local so this
+ * package stays dependency-light.
+ */
+export const CAIP2: Record<Network, string> = {
+  testnet: "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDe",
+  mainnet: "algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73k",
+};
+
+/** USDC as an Algorand ASA. Wrong id per network means a payment that never settles. */
+export const USDC_ASSET_ID: Record<Network, number> = {
+  testnet: 10458941,
+  mainnet: 31566704,
+};
+
+export const USDC_DECIMALS = 6;
+
+/** Box name prefixes, exactly as the contracts write them. */
+export const BOX_PREFIX = {
+  /** IdentityRegistry: `ag_` + uint64 agent id, big-endian. */
+  agent: "ag_",
+  /** IdentityRegistry: `dm_` + the domain's raw UTF-8 bytes. */
+  domain: "dm_",
+  /** IdentityRegistry: `ad_` + the 32-byte account public key. */
+  address: "ad_",
+  /** ReputationRegistry: `sc_` + uint64 agent id, big-endian. */
+  score: "sc_",
+  /** ReputationRegistry: `pd_` + the 32-byte payment txid that was credited. */
+  paid: "pd_",
+  /** ValidationRegistry: `jb_` + uint64 job id, big-endian. */
+  job: "jb_",
+} as const;
+
+/**
+ * Job lifecycle, copied from the constants at the top of
+ * `ripar-contracts/contracts/validation_registry.py`. `disputed` (4) is a
+ * validator's failing verdict, not an error — the contract keeps it because
+ * hiding failures would make the score meaningless.
+ */
+export const JOB_STATUS = {
+  0: "open",
+  1: "assigned",
+  2: "submitted",
+  3: "validated",
+  4: "disputed",
+  5: "cancelled",
+} as const;
+
+export type JobStatusCode = keyof typeof JOB_STATUS;
+export type JobStatus = (typeof JOB_STATUS)[JobStatusCode];
+
+export function jobStatusName(code: number | bigint): JobStatus | "unknown" {
+  const k = Number(code) as JobStatusCode;
+  return JOB_STATUS[k] ?? "unknown";
+}
+
+export type RiparConfig = {
+  network: Network;
+  algod: string;
+  indexer: string;
+  explorer: string;
+  appIds: { identity: number; reputation: number; validation: number };
+  fetch: typeof fetch;
+};
+
+export type RiparConfigInput = Partial<Omit<RiparConfig, "appIds">> & {
+  appIds?: Partial<RiparConfig["appIds"]>;
+};
+
+export function resolveConfig(input: RiparConfigInput = {}): RiparConfig {
+  const network = input.network ?? "testnet";
+  const eps = ENDPOINTS[network];
+  // Only TestNet has registries deployed. Asking for mainnet without supplying
+  // app ids should fail loudly rather than read app id 0 and return nothing.
+  const defaults = network === "testnet" ? REGISTRY_APP_IDS.testnet : undefined;
+  const appIds = {
+    identity: input.appIds?.identity ?? defaults?.identity ?? 0,
+    reputation: input.appIds?.reputation ?? defaults?.reputation ?? 0,
+    validation: input.appIds?.validation ?? defaults?.validation ?? 0,
+  };
+  return {
+    network,
+    algod: input.algod ?? eps.algod,
+    indexer: input.indexer ?? eps.indexer,
+    explorer: input.explorer ?? eps.explorer,
+    appIds,
+    fetch: input.fetch ?? globalThis.fetch,
+  };
+}
+
+export function explorerTxUrl(cfg: RiparConfig, txId: string): string {
+  return `${cfg.explorer}/tx/${txId}`;
+}
+
+export function explorerAppUrl(cfg: RiparConfig, appId: number): string {
+  return `${cfg.explorer}/application/${appId}`;
+}
+
+export function explorerAddressUrl(cfg: RiparConfig, address: string): string {
+  return `${cfg.explorer}/address/${address}`;
+}
