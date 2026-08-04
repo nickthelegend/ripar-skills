@@ -12,7 +12,7 @@ export type Network = "testnet" | "mainnet";
 /** The three Ripar registries. TestNet is the only network they exist on today. */
 export const REGISTRY_APP_IDS = {
   testnet: {
-    identity: 768570170,
+    identity: 768571941,
     // v3. v1 (768547170) took the payment id and amount as ARGUMENTS and only
     // checked the id was 32 bytes and unseen, so a score could be minted from
     // bytes — two of the scores it published resolve to no transaction at all.
@@ -21,8 +21,8 @@ export const REGISTRY_APP_IDS = {
     // credited any agent id you named. This one resolves both ends through the
     // IdentityRegistry: a credit requires the payment to have gone from the
     // client's registered address to the server's.
-    reputation: 768570171,
-    validation: 768570174,
+    reputation: 768571942,
+    validation: 768571946,
   },
 } as const satisfies Record<"testnet", Record<string, number>>;
 

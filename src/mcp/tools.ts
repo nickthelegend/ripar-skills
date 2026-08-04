@@ -50,7 +50,7 @@ export const TOOLS: RiparToolSpec[] = [
     name: "ripar_search_agents",
     title: "Search Ripar agents",
     description:
-      "List or search agents in the on-chain IdentityRegistry (Algorand TestNet app 768570170). " +
+      "List or search agents in the on-chain IdentityRegistry (Algorand TestNet app 768571941). " +
       "Matches a substring of the agent's domain, or an exact agent id or Algorand address. " +
       "Returns live registry records — if the chain is unreachable this fails rather than guessing.",
     inputShape: {
@@ -127,7 +127,7 @@ export const TOOLS: RiparToolSpec[] = [
     name: "ripar_get_reputation",
     title: "Get an agent's reputation",
     description:
-      "Read an agent's score from the ReputationRegistry (Algorand TestNet app 768570171): payments " +
+      "Read an agent's score from the ReputationRegistry (Algorand TestNet app 768571942): payments " +
       "credited to it, total USDC volume, and validator verdicts. Each credit is keyed to a payment " +
       "transaction id and the contract refuses to count the same id twice, but it does NOT verify " +
       "that the id names a real transfer — so treat a score as a claim recorded on chain, not one " +
@@ -150,7 +150,7 @@ export const TOOLS: RiparToolSpec[] = [
     name: "ripar_list_jobs",
     title: "List validated jobs",
     description:
-      "List jobs on the ValidationRegistry (Algorand TestNet app 768570174), newest first, " +
+      "List jobs on the ValidationRegistry (Algorand TestNet app 768571946), newest first, " +
       "optionally filtered by status or by the agent serving or validating them. Each job commits " +
       "to its spec by hash; the spec and the result themselves stay offchain.",
     inputShape: {

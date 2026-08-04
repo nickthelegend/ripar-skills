@@ -28,7 +28,7 @@ const describeLive = skip ? describe.skip : describe;
 const registry = new RiparRegistry();
 
 describeLive("live TestNet registries", () => {
-  it("reads agent_count out of IdentityRegistry 768570170", async () => {
+  it("reads agent_count out of IdentityRegistry 768571941", async () => {
     const total = await registry.totalAgents();
     expect(typeof total).toBe("number");
     // The registry has been exercised, so at least one agent exists.
@@ -64,7 +64,7 @@ describeLive("live TestNet registries", () => {
     expect(await registry.getAgent(999_999)).toBeNull();
   });
 
-  it("reads a score box from ReputationRegistry 768570171", async () => {
+  it("reads a score box from ReputationRegistry 768571942", async () => {
     const [agent] = await registry.listAgents(1);
     const score = await registry.getScore(agent!.agentId);
     if (score === null) {
@@ -78,7 +78,7 @@ describeLive("live TestNet registries", () => {
     if (score.jobsPaid > 0) expect(score.firstAt).toBeGreaterThan(1_600_000_000);
   });
 
-  it("reads jobs from ValidationRegistry 768570174 with valid spec hashes", async () => {
+  it("reads jobs from ValidationRegistry 768571946 with valid spec hashes", async () => {
     const jobs = await registry.listJobs({ limit: 10 });
     expect(await registry.totalJobs()).toBeGreaterThanOrEqual(jobs.length);
     for (const job of jobs) {
