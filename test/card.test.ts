@@ -142,7 +142,7 @@ describe("parseAgentCard: Ripar extensions", () => {
         },
         {
           uri: RIPAR_EXT.registry,
-          params: { chain: "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDe", agentId: 1, identityApp: 768571941 },
+          params: { chain: "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDe", agentId: 1, identityApp: 768572968 },
         },
         {
           uri: RIPAR_EXT.mcp,
@@ -170,7 +170,7 @@ describe("parseAgentCard: Ripar extensions", () => {
     expect(registry).toEqual({
       chain: "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDe",
       agentId: 1,
-      identityApp: 768571941,
+      identityApp: 768572968,
       reputationApp: undefined,
       validationApp: undefined,
     });
@@ -317,9 +317,9 @@ describe("riparAgentCard", () => {
     const parsed = parseAgentCard(card);
     expect(parsed.registry).toMatchObject({
       agentId: 1,
-      identityApp: 768571941,
-      reputationApp: 768571942,
-      validationApp: 768571946,
+      identityApp: 768572968,
+      reputationApp: 768572969,
+      validationApp: 768572979,
     });
     // With an id claimed and the apps named, it should not warn about being unbacked.
     expect(parsed.warnings.join(" ")).not.toMatch(/no registry extension/);

@@ -1,5 +1,5 @@
 /**
- * The eight tools, defined as data.
+ * The ten tools, defined as data.
  *
  * Keeping the specs in a plain array — rather than inline in `registerTool`
  * calls — means the schemas can be asserted on directly, an A2A card can list
@@ -7,14 +7,14 @@
  * test instead of failing silently in a client that just... doesn't show it.
  *
  * The read/write split is the important thing here. Six tools read the chain
- * and are marked `readOnlyHint`. One (`ripar_post_job`) composes a transaction
- * and returns it UNSIGNED. One (`ripar_call_endpoint`) can spend money, but
- * only with a payment header the caller supplies, because this process has no
- * key. A client is entitled to show a confirmation prompt for those last two
- * and nothing else, and the annotations say so honestly.
+ * and are marked `readOnlyHint`. Three compose a transaction and return it
+ * UNSIGNED. One (`ripar_call_endpoint`) can spend money, but only with a
+ * payment header the caller supplies, because this process has no key. A client
+ * is entitled to show a confirmation prompt for those last four and nothing
+ * else, and the annotations say so honestly.
  */
 import { z } from "zod";
-import type { RiparRegistry } from "../registry.js";
+import { type RiparRegistry } from "../registry.js";
 import type { RiparConfig } from "../config.js";
 import { SKILLS, skillPriceUsdc, skillInputJsonSchema } from "../skills.js";
 export type ToolContext = {

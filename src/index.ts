@@ -44,6 +44,8 @@ export {
   addressBoxName,
   scoreBoxName,
   jobBoxName,
+  escrowBoxName,
+  idFromBoxName,
   base32TxIdToBytes,
   uint64Bytes,
   toHex,
@@ -53,7 +55,15 @@ export {
   type Job,
 } from "./abi.js";
 
-export { RiparRegistry, RiparReadError, microToUsdc, type Settlement } from "./registry.js";
+export {
+  RiparRegistry,
+  RiparReadError,
+  microToUsdc,
+  withEscrow,
+  type Settlement,
+  type EscrowTerms,
+  type JobWithEscrow,
+} from "./registry.js";
 
 export {
   SKILLS,
@@ -74,8 +84,14 @@ export {
 export {
   composeAppCall,
   composePostJob,
+  composeFundJob,
+  composeReleaseEscrow,
+  composeRefundEscrow,
   suggestedParams,
+  type BoxRef,
   type UnsignedTransaction,
+  type UnsignedTransactionGroup,
+  type UnsignedGroupMember,
 } from "./unsigned.js";
 
 export {

@@ -52,7 +52,10 @@ jobs:
             exit 1
           fi
 
-      - name: the MCP server answers a real initialize
+      # All three halves of the protocol, because a resource or prompt that is
+      # registered but never advertised is invisible to every client, and the
+      # unit tests drive an in-memory transport rather than the shipped binary.
+      - name: the MCP server answers a real initialize, and serves all three surfaces
         run: |
           node -e '
             const { spawn } = require("node:child_process");
@@ -74,11 +77,25 @@ jobs:
             setTimeout(() => {
               send({ jsonrpc: "2.0", method: "notifications/initialized" });
               send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+              // Both listings are live chain reads, so they also prove the
+              // server can reach algod at all from this runner.
+              send({ jsonrpc: "2.0", id: 3, method: "resources/list" });
+              send({ jsonrpc: "2.0", id: 4, method: "prompts/list" });
             }, 1000);
             setTimeout(() => {
-              const tools = seen.find((m) => m.id === 2)?.result?.tools ?? [];
+              const at = (id, key) => seen.find((m) => m.id === id)?.result?.[key] ?? [];
+              const tools = at(2, "tools"), resources = at(3, "resources"), prompts = at(4, "prompts");
               p.kill();
-              if (!tools.length) { console.error("the MCP server registered no tools"); process.exit(1); }
-              console.log("MCP server registered", tools.length, "tools");
-            }, 3000);
+              const missing = [
+                !tools.length && "tools",
+                !resources.length && "resources",
+                !prompts.length && "prompts",
+              ].filter(Boolean);
+              if (missing.length) {
+                console.error("the MCP server registered no " + missing.join(", "));
+                process.exit(1);
+              }
+              console.log("MCP server registered", tools.length, "tools,",
+                          resources.length, "resources,", prompts.length, "prompts");
+            }, 8000);
           '

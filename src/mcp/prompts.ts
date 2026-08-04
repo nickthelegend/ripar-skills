@@ -1,0 +1,214 @@
+/**
+ * MCP prompts: the three flows that are easy to get wrong.
+ *
+ * A prompt here is not a personality or a system message. It is a procedure a
+ * user can pick from a menu — "vet this agent before paying it" — that expands
+ * into the ORDER the tools have to be called in, and the reasons an answer
+ * should be no. That order is the part a model does not get from the tool
+ * descriptions: any one tool can say what it returns, but nothing in
+ * `ripar_get_reputation` says "check the settlements before you believe this",
+ * and nothing in `ripar_post_job` says "your budget is not money until you
+ * fund it".
+ *
+ * Two rules hold for everything in this file:
+ *
+ *   1. Every tool named in a prompt exists. A prompt that references a tool the
+ *      server does not register sends the model looking for something that
+ *      cannot be found, and it will improvise instead — which, for a question
+ *      about whether an agent has been paid, means inventing a track record.
+ *      `PROMPTS_REFERENCE_TOOLS` is asserted against `TOOL_NAMES` in the tests.
+ *   2. Nothing here tells the model to sign anything. The compose tools return
+ *      unsigned transactions and the prompts say so, because a flow that ends
+ *      "and then submit it" would be describing a capability this server does
+ *      not have.
+ */
+
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+export type RiparPromptSpec = {
+  name: string;
+  title: string;
+  description: string;
+  argsShape: z.ZodRawShape;
+  /** Tool names the rendered text tells the model to use. Checked against TOOL_NAMES. */
+  tools: string[];
+  render: (args: Record<string, string | undefined>) => string;
+};
+
+export const PROMPTS: RiparPromptSpec[] = [
+  {
+    name: "vet_agent",
+    title: "Vet an agent before paying it",
+    description:
+      "Check an agent's on-chain identity, whether anyone has actually paid it, whether those " +
+      "payments are real, and what it charges — in that order, ending in a recommendation that is " +
+      "allowed to be 'no'.",
+    argsShape: {
+      agent: z
+        .string()
+        .describe("Agent id, domain, or Algorand address — whatever you were given"),
+      endpoint: z
+        .string()
+        .optional()
+        .describe("A paid URL you are considering calling, if you have one"),
+    },
+    tools: [
+      "ripar_get_agent",
+      "ripar_get_reputation",
+      "ripar_settlements",
+      "ripar_quote_endpoint",
+      "ripar_list_jobs",
+    ],
+    render: (a) => `Vet the Ripar agent "${a.agent}" before I pay it anything. Work in this order and
+show me what each step returned.
+
+1. ripar_get_agent — resolve "${a.agent}" to a registry record. If nothing resolves, stop: an
+   unregistered domain is a claim with nothing behind it, and everything below would be about a
+   stranger. Note the controlling address; that is the account any payment would go to.
+
+2. ripar_get_reputation — read its score. What matters is jobs_paid and volume, and the difference
+   between a score of null and a score of zero: null means it has never been paid at all. Also read
+   validated and disputed — those are validator verdicts written by the ValidationRegistry, and a
+   disputed count above zero is the most informative number on the record.
+
+3. ripar_settlements — cross-check that score against real USDC transfers on the indexer. The score
+   is a record the contract keeps; the transfers are money that demonstrably moved. If the score
+   claims volume that no transfer supports, say so plainly, and treat that as disqualifying rather
+   than as a discrepancy to be explained away.
+
+4. ripar_list_jobs with this agent's id — look at the work itself. For each job compare BUDGET
+   against ESCROW: budget is what a client said the work was worth, escrow is what they actually
+   handed over. A history of unfunded jobs tells you something different from a history of funded
+   ones. Note any job that ended 'disputed'.
+${
+  a.endpoint
+    ? `
+5. ripar_quote_endpoint on ${a.endpoint} — find out what it charges before committing. Check that
+   the payee in the 402 challenge is the SAME address the registry gave you in step 1. If it is
+   not, stop there and tell me: a card can be written by anyone, but the registry entry is signed
+   by the account being paid.
+`
+    : `
+5. If you are given an endpoint later, quote it with ripar_quote_endpoint and check that the payee
+   in the challenge matches the address from step 1 before paying anything.
+`
+}
+Then give me a recommendation in three lines: what this agent has actually been paid for, what is
+unproven, and whether I should pay it. "Not enough evidence" is a real answer — prefer it to a
+confident one you cannot support from the reads above. Do not fill any gap with a plausible number.`,
+  },
+
+  {
+    name: "post_and_fund_job",
+    title: "Post a job and actually fund it",
+    description:
+      "Compose the post_job transaction and then the two-transaction funding group, explaining at " +
+      "each step what signing would commit and why a budget alone commits nothing.",
+    argsShape: {
+      sender: z.string().describe("The address that will sign — it becomes the job's client"),
+      specHash: z.string().describe("Hex of the 32-byte sha256 digest of the job spec"),
+      budgetUsdc: z.string().describe("Budget in whole USDC, e.g. 2.50"),
+      validatorAgentId: z
+        .string()
+        .optional()
+        .describe("Registry id of the agent that will judge the result, if you have picked one"),
+    },
+    tools: ["ripar_post_job", "ripar_list_jobs", "ripar_fund_job", "ripar_get_agent"],
+    render: (a) => `Post a Ripar job for me and then fund it. I will sign; you compose.
+
+Budget: ${a.budgetUsdc} USDC. Spec hash: ${a.specHash}. Client: ${a.sender}.
+${
+  a.validatorAgentId
+    ? `Validator: agent ${a.validatorAgentId} — resolve it with ripar_get_agent first and tell me who
+it is, because that agent alone will decide whether the work passed.`
+    : `No validator named, which means I judge the work myself. Say so explicitly when you compose.`
+}
+
+1. ripar_post_job — compose it. Convert the budget to base units yourself (six decimals, so 2.50 is
+   2500000) and show me that conversion. Read back the summary and the expected job id. Do not
+   submit anything: what comes back is an unsigned transaction for me to sign in a wallet, and this
+   server holds no key.
+
+2. Tell me plainly that posting commits NO money. The budget is a number in a box; until it is
+   funded the escrow is 0 and any agent looking at the job can see that.
+
+3. Once I tell you the job id it actually got, use ripar_list_jobs with that jobId to confirm it
+   exists, is 'open', and shows escrow 0.
+
+4. ripar_fund_job — compose the funding group for that job id and the same amount. Explain that it
+   is TWO transactions sharing one group id: the asset transfer to the registry's app account, and
+   the fund_job call that reads the amount off that transfer instead of trusting an argument. Both
+   must be signed and submitted together, in order.
+
+5. Tell me what happens to the money afterwards: it sits in the contract's account until the work
+   is judged. On a pass it goes to the assignee, on a failure or a cancellation it comes back to me.
+   Neither happens automatically — somebody has to compose that call too.`,
+  },
+
+  {
+    name: "settle_job_escrow",
+    title: "Settle a job's escrow",
+    description:
+      "Work out whether a job's escrow should be released to the assignee or refunded to the " +
+      "client, who is allowed to do it right now, and compose the unsigned call.",
+    argsShape: {
+      jobId: z.string().describe("The job whose escrow should move"),
+      sender: z.string().describe("The address that will sign and pay the fee"),
+    },
+    tools: ["ripar_list_jobs", "ripar_settle_escrow", "ripar_get_agent"],
+    render: (a) => `Help me settle the escrow on Ripar job ${a.jobId}. I will sign; you compose.
+
+1. ripar_list_jobs with jobId ${a.jobId} — read its status and its escrow. If escrow is 0 there is
+   nothing to settle: either it was never funded, or it was already paid out, because the contract
+   deletes the record before it sends. Say which is more likely from the status and stop.
+
+2. Decide the direction from the status, and tell me the rule you used:
+     validated -> release, which pays the assigned agent
+     disputed or cancelled -> refund, which returns the money to the client
+     anything else -> neither is legal yet; say what the job is waiting for and stop.
+
+3. If it is a release, use ripar_get_agent on the job's server agent id and tell me who is about to
+   be paid, by domain and address. Money leaving an escrow should never be described only as an id.
+
+4. ripar_settle_escrow with jobId ${a.jobId}, sender ${a.sender}, and the action from step 2. Read
+   back who may sign it and when. For a release that matters: the client may sign immediately, and
+   anyone at all may sign once the dispute window has passed since the verdict — that second path
+   exists so a validator who never comes back cannot freeze the worker's money for good. The tool
+   reports the exact time that window closes; give it to me.
+
+5. Remind me this is unsigned and nothing has been submitted. If the response says I am not the
+   client and the window has not closed yet, tell me to wait rather than to sign — signing early
+   burns a fee for a transaction the contract will reject.`,
+  },
+];
+
+/** Every tool name any prompt tells the model to call. Asserted against TOOL_NAMES. */
+export const PROMPTS_REFERENCE_TOOLS: string[] = [...new Set(PROMPTS.flatMap((p) => p.tools))];
+
+export function getPrompt(name: string): RiparPromptSpec | undefined {
+  return PROMPTS.find((p) => p.name === name);
+}
+
+export function registerRiparPrompts(server: McpServer): void {
+  for (const prompt of PROMPTS) {
+    server.registerPrompt(
+      prompt.name,
+      { title: prompt.title, description: prompt.description, argsSchema: prompt.argsShape },
+      (args) => ({
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              // MCP declares prompts/get arguments as a map of strings in the
+              // protocol schema itself, so this is the wire type rather than an
+              // assumption about what a client will send.
+              text: prompt.render(args as Record<string, string | undefined>),
+            },
+          },
+        ],
+      })
+    );
+  }
+}

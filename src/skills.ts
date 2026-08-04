@@ -198,10 +198,11 @@ export const settlementAuditSkill: Skill<typeof settlementInput> = {
   id: "ripar.settlement.audit",
   name: "Settlement audit",
   description:
-    "Join real USDC transfers from the Algorand indexer against the ReputationRegistry's record of " +
-    "which payments it has already counted, and report the difference. An inbound payment that is " +
-    "not yet counted is reputation the agent has earned but has not been credited for — the gap is " +
-    "only visible because the two sources are read together.",
+    "Read an agent's real USDC transfers from the Algorand indexer and report them next to the " +
+    "score the ReputationRegistry actually holds, so a claimed track record can be checked against " +
+    "money that demonstrably moved. No transfer carries an 'already credited' flag, because the " +
+    "chain records none; what this adds is which inbound transfers accept_feedback could still be " +
+    "called for, and which can never be (a zero-amount or self-sent one).",
   tags: ["x402", "settlement", "reputation", "audit"],
   examples: [
     "Which of agent 1's payments could be credited to its score?",

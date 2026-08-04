@@ -19,7 +19,12 @@ import { describe, expect, it } from "vitest";
 
 import { RiparRegistry } from "../src/registry.js";
 import { REGISTRY_APP_IDS } from "../src/config.js";
-import { composePostJob } from "../src/unsigned.js";
+import {
+  composeFundJob,
+  composePostJob,
+  composeRefundEscrow,
+  composeReleaseEscrow,
+} from "../src/unsigned.js";
 import algosdk from "algosdk";
 
 const skip = process.env.RIPAR_SKIP_LIVE === "1";
@@ -28,7 +33,7 @@ const describeLive = skip ? describe.skip : describe;
 const registry = new RiparRegistry();
 
 describeLive("live TestNet registries", () => {
-  it("reads agent_count out of IdentityRegistry 768571941", async () => {
+  it("reads agent_count out of IdentityRegistry 768572968", async () => {
     const total = await registry.totalAgents();
     expect(typeof total).toBe("number");
     // The registry has been exercised, so at least one agent exists.
@@ -64,7 +69,7 @@ describeLive("live TestNet registries", () => {
     expect(await registry.getAgent(999_999)).toBeNull();
   });
 
-  it("reads a score box from ReputationRegistry 768571942", async () => {
+  it("reads a score box from ReputationRegistry 768572969", async () => {
     const [agent] = await registry.listAgents(1);
     const score = await registry.getScore(agent!.agentId);
     if (score === null) {
@@ -78,7 +83,7 @@ describeLive("live TestNet registries", () => {
     if (score.jobsPaid > 0) expect(score.firstAt).toBeGreaterThan(1_600_000_000);
   });
 
-  it("reads jobs from ValidationRegistry 768571946 with valid spec hashes", async () => {
+  it("reads jobs from ValidationRegistry 768572979 with valid spec hashes", async () => {
     const jobs = await registry.listJobs({ limit: 10 });
     expect(await registry.totalJobs()).toBeGreaterThanOrEqual(jobs.length);
     for (const job of jobs) {
@@ -106,6 +111,101 @@ describeLive("live TestNet registries", () => {
     // jobs_paid is not: accept_feedback asserts asset_amount > 0.
     expect(score!.volumeMicro / score!.jobsPaid).toBeGreaterThan(0);
     expect(score!.firstAt).toBeLessThanOrEqual(score!.lastAt);
+  });
+
+  it("reads the escrow terms the ValidationRegistry was bootstrapped with", async () => {
+    const terms = await registry.escrowTerms();
+    // A zero here means the registry was deployed but never bootstrapped, and
+    // nothing could be funded at all — worth failing loudly over.
+    expect(terms.assetId).toBeGreaterThan(0);
+    expect(terms.disputeWindowSecs).toBeGreaterThan(0);
+    expect(algosdk.isValidAddress(terms.appAddress)).toBe(true);
+    // The registry names the identity app it resolves agents through, and it
+    // must be the one this package reads agents from, or a release would pay
+    // whoever holds that id somewhere else.
+    expect(terms.identityApp).toBe(REGISTRY_APP_IDS.testnet.identity);
+  });
+
+  it("reports budget and escrow separately for every live job", async () => {
+    const jobs = await registry.listJobsWithEscrow({ limit: 10 });
+    expect(jobs.length).toBeGreaterThanOrEqual(1);
+    for (const job of jobs) {
+      expect(job.budgetMicro).toBeGreaterThan(0);
+      expect(job.escrowMicro).toBeGreaterThanOrEqual(0);
+      expect(job.funded).toBe(job.escrowMicro > 0);
+      // The listing-derived map and a direct box read are two different paths
+      // to the same box; a disagreement means one of them is looking at the
+      // wrong name.
+      expect(await registry.getEscrow(job.jobId)).toBe(job.escrowMicro);
+      expect(job.unfundedMicro).toBe(Math.max(job.budgetMicro - job.escrowMicro, 0));
+    }
+  });
+
+  it("every es_ box on chain belongs to a job that exists", async () => {
+    const escrows = await registry.escrowMap();
+    for (const [jobId, micro] of escrows) {
+      // A funded box with no job would mean money held against nothing.
+      expect(await registry.getJob(jobId), `es_${jobId} has no jb_${jobId}`).not.toBeNull();
+      expect(micro).toBeGreaterThan(0);
+    }
+  });
+
+  it("refuses to compose an escrow move the chain would reject anyway", async () => {
+    const jobs = await registry.listJobsWithEscrow({ limit: 25 });
+    const client = jobs[0]!.client;
+
+    const unfunded = jobs.find((j) => !j.funded);
+    if (unfunded) {
+      // Nothing is held, so neither direction is composable — and the reason
+      // has to say which of the two things happened, since the contract
+      // deletes the box on payout.
+      await expect(
+        Promise.any([
+          composeReleaseEscrow(registry.config, { sender: client, jobId: unfunded.jobId }),
+          composeRefundEscrow(registry.config, { sender: client, jobId: unfunded.jobId }),
+        ])
+      ).rejects.toBeDefined();
+    }
+
+    const settled = jobs.find((j) => j.status === "validated" || j.status === "disputed");
+    if (settled) {
+      // Funding is only accepted while a job is open or assigned.
+      await expect(
+        composeFundJob(registry.config, {
+          sender: settled.client,
+          jobId: settled.jobId,
+          amountMicro: 1_000,
+        })
+      ).rejects.toThrow(/open or assigned|only the client/i);
+    }
+  });
+
+  it("composes a fund_job group whose transfer goes to the app account itself", async () => {
+    const jobs = await registry.listJobsWithEscrow({ limit: 25 });
+    const fundable = jobs.find((j) => j.status === "open" || j.status === "assigned");
+    if (!fundable) {
+      // Every live job has already been settled. Nothing to compose against,
+      // and inventing a job id would test the stub, not the chain.
+      return;
+    }
+    const terms = await registry.escrowTerms();
+    const group = await composeFundJob(registry.config, {
+      sender: fundable.client,
+      jobId: fundable.jobId,
+      amountMicro: fundable.budgetMicro,
+    });
+
+    expect(group.transactions).toHaveLength(2);
+    const xfer = algosdk.decodeUnsignedTransaction(
+      new Uint8Array(Buffer.from(group.transactions[0]!.unsignedTxnBase64, "base64"))
+    );
+    expect(xfer.assetTransfer!.receiver.toString()).toBe(terms.appAddress);
+    expect(Number(xfer.assetTransfer!.assetIndex)).toBe(terms.assetId);
+    // Both members carry the same group id, or neither would be accepted.
+    const call = algosdk.decodeUnsignedTransaction(
+      new Uint8Array(Buffer.from(group.transactions[1]!.unsignedTxnBase64, "base64"))
+    );
+    expect(Buffer.from(call.group!).toString("base64")).toBe(group.groupId);
   });
 
   it("composes a post_job transaction that decodes back to the intended call", async () => {

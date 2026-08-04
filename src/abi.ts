@@ -209,6 +209,32 @@ export function jobBoxName(jobId: number | bigint): Uint8Array {
 }
 
 /**
+ * `es_` + the job id. The VALUE is a bare uint64 of base units, not an ARC-4
+ * struct — `BoxMap(UInt64, UInt64)` stores `itob(amount)` and nothing else — so
+ * `decodeUint64Box` reads it, exactly as it reads the `dm_`/`ad_` pointers.
+ */
+export function escrowBoxName(jobId: number | bigint): Uint8Array {
+  return withPrefix(BOX_PREFIX.escrow, uint64Bytes(jobId));
+}
+
+/**
+ * The id back out of a `<prefix>` + uint64 box name, for turning a box LISTING
+ * into a map without a read per candidate id. Throws on a name that does not
+ * carry the prefix, because silently returning a number for someone else's box
+ * would attach an escrow to the wrong job.
+ */
+export function idFromBoxName(name: Uint8Array, prefix: string): number {
+  const head = new TextEncoder().encode(prefix);
+  const matches = name.length === head.length + 8 && head.every((b, i) => name[i] === b);
+  if (!matches) {
+    throw new Error(`Not a ${prefix}<uint64> box name: ${toHex(name)}`);
+  }
+  // slice() copies, so the DataView cannot land on a pooled Buffer's neighbours.
+  const tail = name.slice(head.length);
+  return Number(new DataView(tail.buffer, tail.byteOffset, 8).getBigUint64(0, false));
+}
+
+/**
  * Algorand prints a txid as unpadded RFC-4648 base32 of the 32 raw bytes. The
  * `pd_` box is keyed by those raw bytes, so the printed form has to be decoded
  * before it can be looked up.

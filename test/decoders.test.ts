@@ -4,7 +4,7 @@
  * The fixtures are not invented. Every base64 blob below was captured from
  * Algorand TestNet with
  *
- *   curl "https://testnet-api.algonode.cloud/v2/applications/768571941/box?name=b64:YWdfAAAAAAAAAAE="
+ *   curl "https://testnet-api.algonode.cloud/v2/applications/768572968/box?name=b64:YWdfAAAAAAAAAAE="
  *
  * so a decoder that drifts from what the deployed contracts actually write
  * fails here, offline, instead of returning confident nonsense at runtime.
@@ -36,15 +36,15 @@ import { REGISTRY_APP_IDS, jobStatusName } from "../src/config.js";
 const b64 = (s: string) => new Uint8Array(Buffer.from(s, "base64"));
 const hex = (u: Uint8Array) => Buffer.from(u).toString("hex");
 
-/** IdentityRegistry 768571941, box `ag_` + uint64(1). */
+/** IdentityRegistry 768572968, box `ag_` + uint64(1). */
 const AGENT_1_BOX =
-  "AAAAAAAAAAEAOlBHHKthrrBUpBWu5dvDA7U5EY0eIO91MNt3AEq8gxEmAAAAAGpyEKcAAAAAanIQpwAWcmlwYXItYWdlbnQudmVyY2VsLmFwcA==";
-/** ReputationRegistry 768571942, box `sc_` + uint64(1). */
+  "AAAAAAAAAAEAOlBHHKthrrBUpBWu5dvDA7U5EY0eIO91MNt3AEq8gxEmAAAAAGpyF1YAAAAAanIXVgAWcmlwYXItYWdlbnQudmVyY2VsLmFwcA==";
+/** ReputationRegistry 768572969, box `sc_` + uint64(1). */
 const SCORE_1_BOX =
-  "AAAAAAAAAAEAAAAAAAAAAQAAAAAAACcQAAAAAAAAAAAAAAAAAAAAAAAAAABqchCyAAAAAGpyELI=";
-/** ValidationRegistry 768571946, box `jb_` + uint64(1). */
+  "AAAAAAAAAAEAAAAAAAAAAQAAAAAAACcQAAAAAAAAAAIAAAAAAAAAAAAAAABqchdhAAAAAGpyF5I=";
+/** ValidationRegistry 768572979, box `jb_` + uint64(1). */
 const JOB_1_BOX =
-  "AAAAAAAAAAFQRxyrYa6wVKQVruXbwwO1ORGNHiDvdTDbdwBKvIMRJgAAAAAAAAABAAAAAAAAAAIAAAAAAA9CQABcAH4AAAAAAAAAAwAAAABqchC3AAAAAGpyEMgAIAcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHACAJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQ==";
+  "AAAAAAAAAAFQRxyrYa6wVKQVruXbwwO1ORGNHiDvdTDbdwBKvIMRJgAAAAAAAAABAAAAAAAAAAIAAAAAAA9CQABcAH4AAAAAAAAAAwAAAABqchdmAAAAAGpyF3cAIAcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHACAJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQ==";
 /** `dm_agent-1785821796525.ripar.io` and `ad_<pubkey>` both hold a bare uint64. */
 const POINTER_BOX = "AAAAAAAAAAE=";
 
@@ -58,8 +58,8 @@ describe("AgentInfo decoding", () => {
       agentId: 1,
       domain: AGENT_1_DOMAIN,
       address: AGENT_1_ADDRESS,
-      registeredAt: 1785860263,
-      updatedAt: 1785860263,
+      registeredAt: 1785861974,
+      updatedAt: 1785861974,
     });
   });
 
@@ -106,10 +106,15 @@ describe("Score decoding", () => {
       agentId: 1,
       jobsPaid: 1,
       volumeMicro: 10_000,
-      validated: 0,
+      // Two passing verdicts, written by the ValidationRegistry through
+      // record_validation. On the registries before this one both counters were
+      // permanently 0 while jobs plainly read VALIDATED, because nothing ever
+      // carried the verdict across — a decoder cannot catch that, but a fixture
+      // recaptured after the fix pins that they now move.
+      validated: 2,
       disputed: 0,
-      firstAt: 1785860274,
-      lastAt: 1785860274,
+      firstAt: 1785861985,
+      lastAt: 1785862034,
     });
   });
 
@@ -199,7 +204,7 @@ describe("box names", () => {
   });
 
   it("matches the box names algod actually returns", () => {
-    // These are the exact names from GET /v2/applications/768571941/boxes.
+    // These are the exact names from GET /v2/applications/768572968/boxes.
     expect(Buffer.from(agentBoxName(1)).toString("base64")).toBe("YWdfAAAAAAAAAAE=");
     expect(Buffer.from(domainBoxName(AGENT_1_DOMAIN)).toString("base64")).toBe(
       "ZG1fcmlwYXItYWdlbnQudmVyY2VsLmFwcA=="

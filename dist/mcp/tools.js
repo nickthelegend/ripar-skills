@@ -1,5 +1,5 @@
 /**
- * The eight tools, defined as data.
+ * The ten tools, defined as data.
  *
  * Keeping the specs in a plain array — rather than inline in `registerTool`
  * calls — means the schemas can be asserted on directly, an A2A card can list
@@ -7,14 +7,15 @@
  * test instead of failing silently in a client that just... doesn't show it.
  *
  * The read/write split is the important thing here. Six tools read the chain
- * and are marked `readOnlyHint`. One (`ripar_post_job`) composes a transaction
- * and returns it UNSIGNED. One (`ripar_call_endpoint`) can spend money, but
- * only with a payment header the caller supplies, because this process has no
- * key. A client is entitled to show a confirmation prompt for those last two
- * and nothing else, and the annotations say so honestly.
+ * and are marked `readOnlyHint`. Three compose a transaction and return it
+ * UNSIGNED. One (`ripar_call_endpoint`) can spend money, but only with a
+ * payment header the caller supplies, because this process has no key. A client
+ * is entitled to show a confirmation prompt for those last four and nothing
+ * else, and the annotations say so honestly.
  */
 import { z } from "zod";
-import { composePostJob } from "../unsigned.js";
+import { microToUsdc } from "../registry.js";
+import { composeFundJob, composePostJob, composeRefundEscrow, composeReleaseEscrow, } from "../unsigned.js";
 import { callEndpoint, quoteEndpoint } from "../x402.js";
 import { SKILLS, skillPriceUsdc, skillInputJsonSchema } from "../skills.js";
 import { JOB_STATUS } from "../config.js";
@@ -24,7 +25,7 @@ export const TOOLS = [
     {
         name: "ripar_search_agents",
         title: "Search Ripar agents",
-        description: "List or search agents in the on-chain IdentityRegistry (Algorand TestNet app 768571941). " +
+        description: "List or search agents in the on-chain IdentityRegistry (Algorand TestNet app 768572968). " +
             "Matches a substring of the agent's domain, or an exact agent id or Algorand address. " +
             "Returns live registry records — if the chain is unreachable this fails rather than guessing.",
         inputShape: {
@@ -82,7 +83,11 @@ export const TOOLS = [
                 args.includeReputation !== false
                     ? ctx.registry.getScore(base.agent.agentId).catch(() => null)
                     : Promise.resolve(null),
-                args.includeJobs ? ctx.registry.listJobs({ agentId: base.agent.agentId }) : Promise.resolve(null),
+                // With escrow, because "which jobs is this agent on" is nearly always
+                // asked by someone about to decide whether the work is worth doing.
+                args.includeJobs
+                    ? ctx.registry.listJobsWithEscrow({ agentId: base.agent.agentId })
+                    : Promise.resolve(null),
             ]);
             return { ...base, score, ...(jobs ? { jobs } : {}) };
         },
@@ -90,7 +95,7 @@ export const TOOLS = [
     {
         name: "ripar_get_reputation",
         title: "Get an agent's reputation",
-        description: "Read an agent's score from the ReputationRegistry (Algorand TestNet app 768571942): payments " +
+        description: "Read an agent's score from the ReputationRegistry (Algorand TestNet app 768572969): payments " +
             "credited to it, total USDC volume, and validator verdicts. Each credit is keyed to a payment " +
             "transaction id and the contract refuses to count the same id twice, but it does NOT verify " +
             "that the id names a real transfer — so treat a score as a claim recorded on chain, not one " +
@@ -107,10 +112,16 @@ export const TOOLS = [
     },
     {
         name: "ripar_list_jobs",
-        title: "List validated jobs",
-        description: "List jobs on the ValidationRegistry (Algorand TestNet app 768571946), newest first, " +
+        title: "List validated jobs, with what is actually escrowed",
+        description: "List jobs on the ValidationRegistry (Algorand TestNet app 768572979), newest first, " +
             "optionally filtered by status or by the agent serving or validating them. Each job commits " +
-            "to its spec by hash; the spec and the result themselves stay offchain.",
+            "to its spec by hash; the spec and the result themselves stay offchain. " +
+            "Every job reports BOTH numbers, and they mean different things: the BUDGET is what the " +
+            "client says the work is worth, and the ESCROW is what they have actually handed to the " +
+            "contract. A job with budget 1.0 and escrow 0 is unfunded — the budget is an intention, " +
+            "nobody has committed a cent, and that is the single most useful thing to know before " +
+            "bidding. escrow is read from the `es_` box, which the contract deletes the moment the " +
+            "money is paid out, so 0 on a finished job means it was settled, not that it never existed.",
         inputShape: {
             status: z
                 .enum(jobStatusValues)
@@ -127,23 +138,39 @@ export const TOOLS = [
         },
         annotations: { readOnlyHint: true, openWorldHint: true },
         async run(args, { registry, config }) {
+            // The terms come from global state, so the asset and the dispute window
+            // are the contract's own numbers rather than constants that could drift.
+            const terms = await registry.escrowTerms();
+            const escrow = {
+                assetId: terms.assetId,
+                heldBy: terms.appAddress,
+                disputeWindowSecs: terms.disputeWindowSecs,
+                note: "budget is what the client says the work is worth; escrow is what the contract actually holds. " +
+                    "Fund one with ripar_fund_job, settle it with ripar_settle_escrow.",
+            };
             if (args.jobId !== undefined) {
-                const job = await registry.getJob(args.jobId);
+                const job = await registry.getJobWithEscrow(args.jobId);
                 return job
-                    ? { network: config.network, validationApp: config.appIds.validation, job }
+                    ? { network: config.network, validationApp: config.appIds.validation, escrow, job }
                     : { found: false, reason: `no job ${args.jobId} in the registry` };
             }
-            const jobs = await registry.listJobs({
+            const jobs = await registry.listJobsWithEscrow({
                 status: args.status,
                 agentId: args.agentId,
                 limit: args.limit ?? 25,
             });
+            const fundedMicro = jobs.reduce((sum, j) => sum + j.escrowMicro, 0);
             return {
                 network: config.network,
                 validationApp: config.appIds.validation,
                 total: await registry.totalJobs(),
                 filters: { status: args.status ?? null, agentId: args.agentId ?? null },
                 count: jobs.length,
+                escrow: {
+                    ...escrow,
+                    fundedJobs: jobs.filter((j) => j.funded).length,
+                    totalEscrowedUsdc: microToUsdc(fundedMicro),
+                },
                 jobs,
             };
         },
@@ -151,10 +178,12 @@ export const TOOLS = [
     {
         name: "ripar_settlements",
         title: "Settlement history and reputation gap",
-        description: "List real USDC transfers for an agent from the Algorand indexer, each marked with whether " +
-            "the ReputationRegistry has already counted it. Inbound payments marked counted:false are " +
-            "reputation the agent earned but was never credited for — a gap that is only visible because " +
-            "the transfer log and the registry's `pd_` boxes are read together.",
+        description: "List real USDC transfers for an agent from the Algorand indexer, alongside the score the " +
+            "ReputationRegistry actually holds — so a number an agent claims can be checked against " +
+            "money that demonstrably moved. There is deliberately no per-transfer 'already credited' " +
+            "flag: the chain records none, and inventing one by marking everything uncredited would be " +
+            "a lie in the shape of an answer. What the result does give is `creditable`: the inbound " +
+            "transfers accept_feedback could still be called for.",
         inputShape: {
             agentId: z.number().int().positive().optional().describe("Agent to look at"),
             address: z.string().length(58).optional().describe("Algorand address, if you have no agent id"),
@@ -264,6 +293,86 @@ export const TOOLS = [
                 budgetMicro: args.budgetMicro,
                 validatorAgentId: args.validatorAgentId ?? 0,
             });
+        },
+    },
+    {
+        name: "ripar_fund_job",
+        title: "Compose a fund-job group (unsigned)",
+        description: "Compose the transactions that move a job's budget into real escrow, and return them " +
+            "UNSIGNED. This is a GROUP OF TWO and it only works as two: transaction 0 transfers the " +
+            "asset to the ValidationRegistry's own app account, and transaction 1 calls " +
+            "fund_job(axfer,uint64), which reads the amount off transaction 0 rather than from an " +
+            "argument — so the number recorded is one the chain has already validated and cannot be " +
+            "inflated by the caller. Both share a group id: sign both, in this order, and submit them " +
+            "together, or the group is invalid and nothing happens. Only the job's client may fund it, " +
+            "and only while the job is open or assigned; this checks all three against the chain before " +
+            "composing, so an impossible funding fails here for free instead of on chain for a fee. " +
+            "Funding is what turns a stated budget into money an assignee can see before doing the work. " +
+            "Nothing is submitted and no key is used or held.",
+        inputShape: {
+            sender: z
+                .string()
+                .length(58)
+                .describe("The job's client — the only address the contract lets fund it"),
+            jobId: z.number().int().positive().describe("Job to fund, from ripar_list_jobs"),
+            amountMicro: z
+                .number()
+                .int()
+                .positive()
+                .describe("Amount in the escrow asset's base units — 2500000 is $2.50 at six decimals. Added to " +
+                "anything already escrowed; the contract rejects zero."),
+        },
+        annotations: {
+            readOnlyHint: false,
+            openWorldHint: true,
+            // Composing costs nothing and changes nothing; only signing does.
+            destructiveHint: false,
+            idempotentHint: true,
+        },
+        async run(args, { config }) {
+            return composeFundJob(config, {
+                sender: args.sender,
+                jobId: args.jobId,
+                amountMicro: args.amountMicro,
+            });
+        },
+    },
+    {
+        name: "ripar_settle_escrow",
+        title: "Compose a release or refund of escrow (unsigned)",
+        description: "Compose an UNSIGNED release_escrow or refund_escrow call against the ValidationRegistry, " +
+            "for a job that has money held for it. " +
+            "RELEASE pays the assigned agent and is legal only on a passing verdict (status 'validated'). " +
+            "The client may sign it the moment the verdict lands. ANYONE may sign it once the dispute " +
+            "window has passed since that verdict — that path exists because a validator who never " +
+            "returns would otherwise freeze the worker's money for good, and a lock with no key is not " +
+            "escrow, it is confiscation. The response reports exactly when that window closes. " +
+            "REFUND returns the escrow to the client and is legal only on a failed verdict (status " +
+            "'disputed') or a cancelled job. Anyone may sign it: the destination is read off the job, " +
+            "not off the sender, so triggering a refund can never redirect one. " +
+            "Either way the signer pays only the transaction fee — the escrow itself moves out of the " +
+            "contract's own account. A job whose escrow is already 0 is refused here with the reason, " +
+            "because the contract deletes the box before it sends, which is what makes paying twice " +
+            "impossible. Nothing is submitted and no key is used or held.",
+        inputShape: {
+            sender: z.string().length(58).describe("Address that will sign and pay the fee"),
+            jobId: z.number().int().positive().describe("Job whose escrow should move"),
+            action: z
+                .enum(["release", "refund"])
+                .describe("release pays the assignee on a passing verdict; refund returns it to the client on a " +
+                "failed verdict or a cancelled job. The job's current status decides which one the " +
+                "contract will accept."),
+        },
+        annotations: {
+            readOnlyHint: false,
+            openWorldHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+        },
+        async run(args, { config }) {
+            return args.action === "refund"
+                ? composeRefundEscrow(config, { sender: args.sender, jobId: args.jobId })
+                : composeReleaseEscrow(config, { sender: args.sender, jobId: args.jobId });
         },
     },
 ];

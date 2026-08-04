@@ -77,6 +77,19 @@ export declare function addressBoxName(address: string): Uint8Array;
 export declare function scoreBoxName(agentId: number | bigint): Uint8Array;
 export declare function jobBoxName(jobId: number | bigint): Uint8Array;
 /**
+ * `es_` + the job id. The VALUE is a bare uint64 of base units, not an ARC-4
+ * struct — `BoxMap(UInt64, UInt64)` stores `itob(amount)` and nothing else — so
+ * `decodeUint64Box` reads it, exactly as it reads the `dm_`/`ad_` pointers.
+ */
+export declare function escrowBoxName(jobId: number | bigint): Uint8Array;
+/**
+ * The id back out of a `<prefix>` + uint64 box name, for turning a box LISTING
+ * into a map without a read per candidate id. Throws on a name that does not
+ * carry the prefix, because silently returning a number for someone else's box
+ * would attach an escrow to the wrong job.
+ */
+export declare function idFromBoxName(name: Uint8Array, prefix: string): number;
+/**
  * Algorand prints a txid as unpadded RFC-4648 base32 of the 32 raw bytes. The
  * `pd_` box is keyed by those raw bytes, so the printed form has to be decoded
  * before it can be looked up.

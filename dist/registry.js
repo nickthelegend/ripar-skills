@@ -6,7 +6,8 @@
  * call throws — an agent acting on a fabricated reputation score is worse than
  * an agent that knows it could not check.
  */
-import { addressBoxName, agentBoxName, base32TxIdToBytes, decodeAgentBox, decodeJobBox, decodeScoreBox, decodeUint64Box, domainBoxName, jobBoxName, scoreBoxName, } from "./abi.js";
+import algosdk from "algosdk";
+import { addressBoxName, agentBoxName, decodeAgentBox, decodeJobBox, decodeScoreBox, decodeUint64Box, domainBoxName, escrowBoxName, idFromBoxName, jobBoxName, scoreBoxName, } from "./abi.js";
 import { BOX_PREFIX, USDC_ASSET_ID, USDC_DECIMALS, explorerAddressUrl, explorerTxUrl, resolveConfig, } from "./config.js";
 export class RiparReadError extends Error {
     code;
@@ -101,11 +102,23 @@ export class RiparRegistry {
         throw new RiparReadError(`Box listing for app ${appId} did not finish within ${maxPages} pages of ${pageSize}; ` +
             `refusing to return a partial list that would read as a complete one`, "bad_response");
     }
-    async globalUint(appId, key) {
+    /**
+     * Several global-state uints from ONE request. Reading them one at a time
+     * would fetch the whole application record — approval program included —
+     * once per key, and three keys is the normal case for the escrow terms.
+     */
+    async globalUints(appId, keys) {
         const body = await this.json(`${this.config.algod}/v2/applications/${appId}`);
-        const target = Buffer.from(key, "utf8").toString("base64");
-        const entry = (body.params?.["global-state"] ?? []).find((e) => e.key === target);
-        return Number(entry?.value?.uint ?? 0);
+        const state = body.params?.["global-state"] ?? [];
+        const out = {};
+        for (const key of keys) {
+            const target = Buffer.from(key, "utf8").toString("base64");
+            out[key] = Number(state.find((e) => e.key === target)?.value?.uint ?? 0);
+        }
+        return out;
+    }
+    async globalUint(appId, key) {
+        return (await this.globalUints(appId, [key]))[key];
     }
     // -------------------------------------------------------------- identity
     /** Total registered agents, from the contract's own `agent_count`. */
@@ -200,6 +213,83 @@ export class RiparRegistry {
         }
         return jobs.sort((a, b) => b.jobId - a.jobId).slice(0, limit);
     }
+    // ---------------------------------------------------------------- escrow
+    /**
+     * What is actually held for a job, in base units. 0 when nothing is.
+     *
+     * This reads the `es_` box rather than calling the contract's own
+     * `get_escrow`, and the two cannot disagree — the method is `readonly` and
+     * its whole body is that box lookup with the same absent-means-zero rule.
+     * Calling it would mean composing an app call with the right box reference
+     * and simulating it; the box read is the same fact over a plain GET.
+     */
+    async getEscrow(jobId) {
+        if (!Number.isInteger(jobId) || jobId < 1)
+            return 0;
+        const raw = await this.readBox(this.appId("validation"), escrowBoxName(jobId));
+        return raw ? decodeUint64Box(raw) : 0;
+    }
+    /**
+     * Every funded job, as job id -> base units.
+     *
+     * One listing rather than a box read per job, and the listing is exhaustive
+     * by construction: an `es_` box exists only while money is held, so the boxes
+     * that come back ARE the funded set and every job not in this map is
+     * unfunded. Jobs are read separately, so a job whose escrow was released
+     * between the two calls simply reads 0 — which is what it now is.
+     */
+    async escrowMap() {
+        const appId = this.appId("validation");
+        const names = await this.listBoxNames(appId, BOX_PREFIX.escrow);
+        const values = await Promise.all(names.map((n) => this.readBox(appId, n)));
+        const out = new Map();
+        names.forEach((name, i) => {
+            const value = values[i];
+            // Deleted between the listing and the read: paid out, so not funded.
+            if (!value)
+                return;
+            out.set(idFromBoxName(name, BOX_PREFIX.escrow), decodeUint64Box(value));
+        });
+        return out;
+    }
+    /**
+     * The escrow terms, read off the ValidationRegistry's global state.
+     *
+     * Fixed at bootstrap and not per job, so a caller cannot be talked into
+     * funding an escrow denominated in something worthless. `appAddress` is where
+     * a funding transfer has to go — derived from the app id, so it is not a
+     * number anyone can substitute.
+     */
+    async escrowTerms() {
+        const appId = this.appId("validation");
+        const state = await this.globalUints(appId, [
+            "escrow_asset",
+            "dispute_window",
+            "identity_app",
+            "reputation_app",
+        ]);
+        return {
+            validationApp: appId,
+            appAddress: algosdk.getApplicationAddress(appId).toString(),
+            // 0 means the registry was never bootstrapped, so nothing can be funded.
+            assetId: state.escrow_asset,
+            disputeWindowSecs: state.dispute_window,
+            identityApp: state.identity_app,
+            reputationApp: state.reputation_app,
+        };
+    }
+    /** One job, with what is actually escrowed for it. */
+    async getJobWithEscrow(jobId) {
+        const job = await this.getJob(jobId);
+        if (!job)
+            return null;
+        return withEscrow(job, await this.getEscrow(jobId));
+    }
+    /** As listJobs, plus the escrow held for each — one extra listing in total. */
+    async listJobsWithEscrow(opts = {}) {
+        const [jobs, escrows] = await Promise.all([this.listJobs(opts), this.escrowMap()]);
+        return jobs.map((j) => withEscrow(j, escrows.get(j.jobId) ?? 0));
+    }
     // ------------------------------------------------------------ settlements
     /**
      * x402 settlements for an agent: real USDC asset transfers, read off the
@@ -272,6 +362,19 @@ export class RiparRegistry {
         };
     }
 }
+export function withEscrow(job, escrowMicro) {
+    return {
+        ...job,
+        budgetUsdc: microToUsdc(job.budgetMicro),
+        escrowMicro,
+        escrowUsdc: microToUsdc(escrowMicro),
+        funded: escrowMicro > 0,
+        fullyFunded: escrowMicro >= job.budgetMicro,
+        // Over-funding is possible — fund_job adds to whatever is already held — so
+        // this floors at 0 rather than reporting a negative shortfall.
+        unfundedMicro: Math.max(job.budgetMicro - escrowMicro, 0),
+    };
+}
 export function microToUsdc(micro) {
     const sign = micro < 0 ? "-" : "";
     const abs = Math.abs(micro);
@@ -291,12 +394,8 @@ function decodeNote(note) {
         return null;
     }
 }
-/** The printed base32 txid, as the hex the `pd_` box names are keyed by. */
-function txIdToHex(txId) {
-    try {
-        return Buffer.from(base32TxIdToBytes(txId)).toString("hex");
-    }
-    catch {
-        return "";
-    }
-}
+/* txIdToHex() stood here, converting a printed txid into the hex the `pd_` box
+ * names were keyed by. Those boxes are gone and nothing has called it since;
+ * left in place it reads as a live index into a ledger that no longer exists.
+ * base32TxIdToBytes is still exported from abi.ts for callers decoding a txid
+ * for their own reasons. */

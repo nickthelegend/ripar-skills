@@ -10,9 +10,9 @@ export type Network = "testnet" | "mainnet";
 /** The three Ripar registries. TestNet is the only network they exist on today. */
 export declare const REGISTRY_APP_IDS: {
     readonly testnet: {
-        readonly identity: 768571941;
-        readonly reputation: 768571942;
-        readonly validation: 768571946;
+        readonly identity: 768572968;
+        readonly reputation: 768572969;
+        readonly validation: 768572979;
     };
 };
 export type RegistryName = keyof (typeof REGISTRY_APP_IDS)["testnet"];
@@ -60,6 +60,14 @@ export declare const BOX_PREFIX: {
     readonly paid: "pd_";
     /** ValidationRegistry: `jb_` + uint64 job id, big-endian. */
     readonly job: "jb_";
+    /**
+     * ValidationRegistry: `es_` + uint64 job id, holding a bare uint64 of what
+     * is actually escrowed. Its own box map rather than a field on Job, so the
+     * `jb_` layout never moved and every decoder that already read it kept
+     * working. An ABSENT box is zero, not an error: the contract deletes it when
+     * the escrow is paid out, and never creates it for a job nobody funded.
+     */
+    readonly escrow: "es_";
 };
 /**
  * Job lifecycle, copied from the constants at the top of

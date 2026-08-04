@@ -35,6 +35,12 @@ export declare class RiparRegistry {
      * package exists to avoid.
      */
     listBoxNames(appId: number, prefix: string, pageSize?: number, maxPages?: number): Promise<Uint8Array[]>;
+    /**
+     * Several global-state uints from ONE request. Reading them one at a time
+     * would fetch the whole application record — approval program included —
+     * once per key, and three keys is the normal case for the escrow terms.
+     */
+    private globalUints;
     private globalUint;
     /** Total registered agents, from the contract's own `agent_count`. */
     totalAgents(): Promise<number>;
@@ -60,6 +66,43 @@ export declare class RiparRegistry {
         agentId?: number;
         limit?: number;
     }): Promise<Job[]>;
+    /**
+     * What is actually held for a job, in base units. 0 when nothing is.
+     *
+     * This reads the `es_` box rather than calling the contract's own
+     * `get_escrow`, and the two cannot disagree — the method is `readonly` and
+     * its whole body is that box lookup with the same absent-means-zero rule.
+     * Calling it would mean composing an app call with the right box reference
+     * and simulating it; the box read is the same fact over a plain GET.
+     */
+    getEscrow(jobId: number): Promise<number>;
+    /**
+     * Every funded job, as job id -> base units.
+     *
+     * One listing rather than a box read per job, and the listing is exhaustive
+     * by construction: an `es_` box exists only while money is held, so the boxes
+     * that come back ARE the funded set and every job not in this map is
+     * unfunded. Jobs are read separately, so a job whose escrow was released
+     * between the two calls simply reads 0 — which is what it now is.
+     */
+    escrowMap(): Promise<Map<number, number>>;
+    /**
+     * The escrow terms, read off the ValidationRegistry's global state.
+     *
+     * Fixed at bootstrap and not per job, so a caller cannot be talked into
+     * funding an escrow denominated in something worthless. `appAddress` is where
+     * a funding transfer has to go — derived from the app id, so it is not a
+     * number anyone can substitute.
+     */
+    escrowTerms(): Promise<EscrowTerms>;
+    /** One job, with what is actually escrowed for it. */
+    getJobWithEscrow(jobId: number): Promise<JobWithEscrow | null>;
+    /** As listJobs, plus the escrow held for each — one extra listing in total. */
+    listJobsWithEscrow(opts?: {
+        status?: string;
+        agentId?: number;
+        limit?: number;
+    }): Promise<JobWithEscrow[]>;
     /**
      * x402 settlements for an agent: real USDC asset transfers, read off the
      * indexer, each annotated with whether the reputation registry has already
@@ -95,6 +138,37 @@ export declare class RiparRegistry {
         explorer: string;
     }>;
 }
+export type EscrowTerms = {
+    validationApp: number;
+    /** The account that holds funded escrow — the app's own address. */
+    appAddress: string;
+    /** The ASA escrow is denominated in. 0 when the registry was never bootstrapped. */
+    assetId: number;
+    /** Seconds after a passing verdict before anyone at all may release. */
+    disputeWindowSecs: number;
+    identityApp: number;
+    reputationApp: number;
+};
+/**
+ * A job plus the money question a bidder actually has.
+ *
+ * Budget and escrow are different facts. The budget is what the client SAYS the
+ * work is worth; the escrow is what they have handed to the contract. A job
+ * showing budget 1.0 and escrow 0 is unfunded — the budget is an intention, not
+ * a guarantee — and that is the single most useful thing to know before bidding.
+ */
+export type JobWithEscrow = Job & {
+    budgetUsdc: string;
+    escrowMicro: number;
+    escrowUsdc: string;
+    /** True when the contract holds anything at all for this job. */
+    funded: boolean;
+    /** True when it holds at least the stated budget. */
+    fullyFunded: boolean;
+    /** Budget still not backed by money, in base units. 0 when fully funded. */
+    unfundedMicro: number;
+};
+export declare function withEscrow(job: Job, escrowMicro: number): JobWithEscrow;
 export type Settlement = {
     txId: string;
     direction: "in" | "out";

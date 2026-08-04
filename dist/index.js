@@ -12,10 +12,10 @@
  * signs: writes come back as unsigned transactions.
  */
 export { REGISTRY_APP_IDS, ENDPOINTS, CAIP2, USDC_ASSET_ID, USDC_DECIMALS, BOX_PREFIX, JOB_STATUS, jobStatusName, resolveConfig, explorerAddressUrl, explorerAppUrl, explorerTxUrl, } from "./config.js";
-export { AGENT_INFO_TYPE, SCORE_TYPE, JOB_TYPE, decodeAgentBox, decodeScoreBox, decodeJobBox, decodeUint64Box, agentBoxName, domainBoxName, addressBoxName, scoreBoxName, jobBoxName, base32TxIdToBytes, uint64Bytes, toHex, fromHex, } from "./abi.js";
-export { RiparRegistry, RiparReadError, microToUsdc } from "./registry.js";
+export { AGENT_INFO_TYPE, SCORE_TYPE, JOB_TYPE, decodeAgentBox, decodeScoreBox, decodeJobBox, decodeUint64Box, agentBoxName, domainBoxName, addressBoxName, scoreBoxName, jobBoxName, escrowBoxName, idFromBoxName, base32TxIdToBytes, uint64Bytes, toHex, fromHex, } from "./abi.js";
+export { RiparRegistry, RiparReadError, microToUsdc, withEscrow, } from "./registry.js";
 export { SKILLS, getSkill, skillInputJsonSchema, skillPriceUsdc, skillPriceTable, skillsAsCardSkills, skillsManifest, resolveAgentSkill, reputationReportSkill, settlementAuditSkill, postJobSkill, } from "./skills.js";
-export { composeAppCall, composePostJob, suggestedParams, } from "./unsigned.js";
+export { composeAppCall, composePostJob, composeFundJob, composeReleaseEscrow, composeRefundEscrow, suggestedParams, } from "./unsigned.js";
 export { quoteEndpoint, callEndpoint, parseChallenge, } from "./x402.js";
 export * from "./a2a/index.js";
 export * from "./mcp/index.js";

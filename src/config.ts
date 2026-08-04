@@ -12,17 +12,20 @@ export type Network = "testnet" | "mainnet";
 /** The three Ripar registries. TestNet is the only network they exist on today. */
 export const REGISTRY_APP_IDS = {
   testnet: {
-    identity: 768571941,
-    // v3. v1 (768547170) took the payment id and amount as ARGUMENTS and only
+    identity: 768572968,
+    // v4. v1 (768547170) took the payment id and amount as ARGUMENTS and only
     // checked the id was 32 bytes and unseen, so a score could be minted from
     // bytes — two of the scores it published resolve to no transaction at all.
     // v2 (768559198) read them off the settling transfer, but never checked
     // WHERE the money went, so a microUSDC between two addresses you own
-    // credited any agent id you named. This one resolves both ends through the
+    // credited any agent id you named. v3 resolved both ends through the
     // IdentityRegistry: a credit requires the payment to have gone from the
-    // client's registered address to the server's.
-    reputation: 768571942,
-    validation: 768571946,
+    // client's registered address to the server's. This one adds
+    // record_validation, called by the ValidationRegistry and by nothing else,
+    // so a verdict finally reaches the score — before it, `validated` and
+    // `disputed` were permanently 0 while jobs plainly read VALIDATED.
+    reputation: 768572969,
+    validation: 768572979,
   },
 } as const satisfies Record<"testnet", Record<string, number>>;
 
@@ -82,6 +85,14 @@ export const BOX_PREFIX = {
   paid: "pd_",
   /** ValidationRegistry: `jb_` + uint64 job id, big-endian. */
   job: "jb_",
+  /**
+   * ValidationRegistry: `es_` + uint64 job id, holding a bare uint64 of what
+   * is actually escrowed. Its own box map rather than a field on Job, so the
+   * `jb_` layout never moved and every decoder that already read it kept
+   * working. An ABSENT box is zero, not an error: the contract deletes it when
+   * the escrow is paid out, and never creates it for a job nobody funded.
+   */
+  escrow: "es_",
 } as const;
 
 /**

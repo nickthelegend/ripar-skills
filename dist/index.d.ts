@@ -12,10 +12,10 @@
  * signs: writes come back as unsigned transactions.
  */
 export { REGISTRY_APP_IDS, ENDPOINTS, CAIP2, USDC_ASSET_ID, USDC_DECIMALS, BOX_PREFIX, JOB_STATUS, jobStatusName, resolveConfig, explorerAddressUrl, explorerAppUrl, explorerTxUrl, type Network, type RiparConfig, type RiparConfigInput, type JobStatus, } from "./config.js";
-export { AGENT_INFO_TYPE, SCORE_TYPE, JOB_TYPE, decodeAgentBox, decodeScoreBox, decodeJobBox, decodeUint64Box, agentBoxName, domainBoxName, addressBoxName, scoreBoxName, jobBoxName, base32TxIdToBytes, uint64Bytes, toHex, fromHex, type Agent, type Score, type Job, } from "./abi.js";
-export { RiparRegistry, RiparReadError, microToUsdc, type Settlement } from "./registry.js";
+export { AGENT_INFO_TYPE, SCORE_TYPE, JOB_TYPE, decodeAgentBox, decodeScoreBox, decodeJobBox, decodeUint64Box, agentBoxName, domainBoxName, addressBoxName, scoreBoxName, jobBoxName, escrowBoxName, idFromBoxName, base32TxIdToBytes, uint64Bytes, toHex, fromHex, type Agent, type Score, type Job, } from "./abi.js";
+export { RiparRegistry, RiparReadError, microToUsdc, withEscrow, type Settlement, type EscrowTerms, type JobWithEscrow, } from "./registry.js";
 export { SKILLS, getSkill, skillInputJsonSchema, skillPriceUsdc, skillPriceTable, skillsAsCardSkills, skillsManifest, resolveAgentSkill, reputationReportSkill, settlementAuditSkill, postJobSkill, type Skill, type SkillContext, } from "./skills.js";
-export { composeAppCall, composePostJob, suggestedParams, type UnsignedTransaction, } from "./unsigned.js";
+export { composeAppCall, composePostJob, composeFundJob, composeReleaseEscrow, composeRefundEscrow, suggestedParams, type BoxRef, type UnsignedTransaction, type UnsignedTransactionGroup, type UnsignedGroupMember, } from "./unsigned.js";
 export { quoteEndpoint, callEndpoint, parseChallenge, type Quote, type CallResult, type PaymentRequirement, type X402Challenge, } from "./x402.js";
 export * from "./a2a/index.js";
 export * from "./mcp/index.js";

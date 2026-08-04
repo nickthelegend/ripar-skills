@@ -22,6 +22,8 @@ const REQUIRED_TOOLS = [
   "ripar_get_reputation",
   "ripar_list_jobs",
   "ripar_post_job",
+  "ripar_fund_job",
+  "ripar_settle_escrow",
   "ripar_quote_endpoint",
   "ripar_call_endpoint",
   "ripar_settlements",
@@ -32,7 +34,7 @@ const props = (name: string) =>
 const required = (name: string) => (toolJsonSchema(getTool(name)!).required ?? []) as string[];
 
 describe("the tool set", () => {
-  it("exposes exactly the eight advertised tools", () => {
+  it("exposes exactly the ten advertised tools", () => {
     expect([...TOOL_NAMES].sort()).toEqual([...REQUIRED_TOOLS].sort());
   });
 
@@ -63,10 +65,16 @@ describe("read/write annotations", () => {
     }
   });
 
-  it("does NOT mark the two tools that can move money or state read-only", () => {
+  it("does NOT mark the four tools that can move money or state read-only", () => {
     // A client is entitled to prompt for confirmation on exactly these.
-    expect(getTool("ripar_call_endpoint")!.annotations.readOnlyHint).toBe(false);
-    expect(getTool("ripar_post_job")!.annotations.readOnlyHint).toBe(false);
+    for (const name of [
+      "ripar_call_endpoint",
+      "ripar_post_job",
+      "ripar_fund_job",
+      "ripar_settle_escrow",
+    ]) {
+      expect(getTool(name)!.annotations.readOnlyHint, name).toBe(false);
+    }
   });
 
   it("marks every tool open-world, because all of them touch the network", () => {
@@ -131,6 +139,32 @@ describe("tool input schemas", () => {
     expect((props("ripar_post_job").sender as any).minLength).toBe(58);
   });
 
+  it("ripar_fund_job requires the client, the job and an amount above zero", () => {
+    expect(required("ripar_fund_job").sort()).toEqual(["amountMicro", "jobId", "sender"]);
+    // The contract asserts asset_amount > 0; the schema says so before the fee.
+    expect((props("ripar_fund_job").amountMicro as any).exclusiveMinimum).toBe(0);
+    expect((props("ripar_fund_job").sender as any).minLength).toBe(58);
+    expect((props("ripar_fund_job").jobId as any).exclusiveMinimum).toBe(0);
+  });
+
+  it("ripar_settle_escrow offers exactly the two directions the contract has", () => {
+    expect(required("ripar_settle_escrow").sort()).toEqual(["action", "jobId", "sender"]);
+    // Not free text: the contract has release_escrow and refund_escrow, and a
+    // third word would compose a call that does not exist.
+    expect((props("ripar_settle_escrow").action as any).enum).toEqual(["release", "refund"]);
+  });
+
+  it("says out loud, in both escrow tools, who may sign and when", () => {
+    const settle = getTool("ripar_settle_escrow")!.description;
+    // The dispute-window path is the non-obvious rule, and the one a caller
+    // most needs before it decides whether to wait.
+    expect(settle).toMatch(/dispute window/i);
+    expect(settle).toMatch(/anyone/i);
+    expect(settle.toLowerCase()).toContain("client");
+    // Funding is a group, and a caller that signs one half has done nothing.
+    expect(getTool("ripar_fund_job")!.description).toMatch(/group/i);
+  });
+
   it("ripar_quote_endpoint and ripar_call_endpoint both require a real url", () => {
     for (const name of ["ripar_quote_endpoint", "ripar_call_endpoint"]) {
       expect(required(name), name).toContain("url");
@@ -165,6 +199,9 @@ describe("toolCatalogue", () => {
     const catalogue = toolCatalogue();
     expect(catalogue.map((t) => t.name)).toEqual(TOOL_NAMES);
     expect(catalogue.filter((t) => t.readOnly)).toHaveLength(6);
+    // Six reads and four that compose or spend: a client showing a
+    // confirmation prompt for the second group is showing it for four things.
+    expect(catalogue.filter((t) => !t.readOnly)).toHaveLength(4);
   });
 });
 
@@ -181,7 +218,7 @@ async function connect(registry?: RiparRegistry) {
 }
 
 describe("the MCP server over an in-memory transport", () => {
-  it("lists all eight tools with their schemas", async () => {
+  it("lists all ten tools with their schemas", async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([...REQUIRED_TOOLS].sort());
@@ -207,14 +244,15 @@ describe("the MCP server over an in-memory transport", () => {
   });
 
   it("returns a real chain read as JSON content", async () => {
-    // Serves a canned IdentityRegistry box; no network involved.
+    // The `ag_` box for agent 1, captured from IdentityRegistry 768572968 — a
+    // real record, served without a network so the assertions can be exact.
     const registry = new RiparRegistry({
       fetch: (async (url: string) => {
         if (url.includes("/box?")) {
           return new Response(
             JSON.stringify({
               value:
-                "AAAAAAAAAAEAOqBDx7Zz+JG0QlruWQjwZq4wILotkFdOWVQ1+BBnam8dAAAAAGpxemIAAAAAanF6YgAcYWdlbnQtMTc4NTgyMTc5NjUyNS5yaXBhci5pbw==",
+                "AAAAAAAAAAEAOlBHHKthrrBUpBWu5dvDA7U5EY0eIO91MNt3AEq8gxEmAAAAAGpyF1YAAAAAanIXVgAWcmlwYXItYWdlbnQudmVyY2VsLmFwcA==",
             }),
             { status: 200 }
           );
@@ -231,10 +269,78 @@ describe("the MCP server over an in-memory transport", () => {
     expect(result.isError).toBeFalsy();
     const parsed = JSON.parse(result.content[0]!.text);
     expect(parsed.found).toBe(true);
-    expect(parsed.agent.domain).toBe("agent-1785821796525.ripar.io");
-    expect(parsed.cardUrl).toBe(
-      "https://agent-1785821796525.ripar.io/.well-known/agent.json"
-    );
+    expect(parsed.agent.domain).toBe("ripar-agent.vercel.app");
+    expect(parsed.cardUrl).toBe("https://ripar-agent.vercel.app/.well-known/agent.json");
+  });
+
+  it("reports escrow next to budget on ripar_list_jobs, for one job and for the list", async () => {
+    // jb_1 with a 1.0 budget and no es_ box: the unfunded case, which is the
+    // one a bidding agent has to be able to see.
+    const JOB_BOX =
+      "AAAAAAAAAAFQRxyrYa6wVKQVruXbwwO1ORGNHiDvdTDbdwBKvIMRJgAAAAAAAAABAAAAAAAAAAIAAAAAAA9CQABcAH4AAAAAAAAAAwAAAABqchdmAAAAAGpyF3cAIAcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHACAJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQ==";
+    const registry = new RiparRegistry({
+      fetch: (async (url: string) => {
+        if (/\/v2\/applications\/\d+$/.test(url)) {
+          const g = (key: string, uint: number) => ({
+            key: Buffer.from(key, "utf8").toString("base64"),
+            value: { uint, type: 2 },
+          });
+          return new Response(
+            JSON.stringify({
+              params: {
+                "global-state": [
+                  g("job_count", 1),
+                  g("escrow_asset", 768_547_363),
+                  g("dispute_window", 20),
+                  g("identity_app", 768_572_968),
+                  g("reputation_app", 768_572_969),
+                ],
+              },
+            }),
+            { status: 200 }
+          );
+        }
+        if (url.includes("/boxes")) {
+          const prefix = decodeURIComponent(new URL(url).searchParams.get("prefix") ?? "");
+          // Only a jb_ box exists. No es_ box means nothing is escrowed.
+          const boxes = prefix.includes(Buffer.from("jb_").toString("base64"))
+            ? [{ name: "amJfAAAAAAAAAAE=" }]
+            : [];
+          return new Response(JSON.stringify({ boxes }), { status: 200 });
+        }
+        if (url.includes("/box?")) {
+          return url.includes(encodeURIComponent("b64:amJf"))
+            ? new Response(JSON.stringify({ value: JOB_BOX }), { status: 200 })
+            : new Response("no box", { status: 404 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }) as unknown as typeof fetch,
+    });
+
+    const { client } = await connect(registry);
+    const call = async (args: Record<string, unknown>) => {
+      const result = (await client.callTool({ name: "ripar_list_jobs", arguments: args })) as {
+        content: { text: string }[];
+        isError?: boolean;
+      };
+      expect(result.isError).toBeFalsy();
+      return JSON.parse(result.content[0]!.text);
+    };
+
+    const list = await call({});
+    expect(list.jobs[0].budgetUsdc).toBe("1.000000");
+    expect(list.jobs[0].escrowUsdc).toBe("0.000000");
+    expect(list.jobs[0].funded).toBe(false);
+    expect(list.escrow.fundedJobs).toBe(0);
+    expect(list.escrow.assetId).toBe(768_547_363);
+    // The distinction is stated, not just numbered — this string is what a
+    // model reads before it decides the budget means it will be paid.
+    expect(list.escrow.note).toMatch(/budget is what the client says/i);
+
+    const one = await call({ jobId: 1 });
+    expect(one.job.escrowMicro).toBe(0);
+    expect(one.job.budgetMicro).toBe(1_000_000);
+    expect(one.job.unfundedMicro).toBe(1_000_000);
   });
 
   it("surfaces a failed chain read as an error, never as an empty result", async () => {

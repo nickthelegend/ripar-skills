@@ -15,3 +15,15 @@ export {
   type RiparToolSpec,
   type ToolContext,
 } from "./tools.js";
+export {
+  RESOURCE_URIS,
+  registerRiparResources,
+  type ResourceContext,
+} from "./resources.js";
+export {
+  PROMPTS,
+  PROMPTS_REFERENCE_TOOLS,
+  getPrompt,
+  registerRiparPrompts,
+  type RiparPromptSpec,
+} from "./prompts.js";
