@@ -1,5 +1,10 @@
 node_modules
-dist
 .env*
 !.env.example
 *.tsbuildinfo
+
+# dist/ IS committed, deliberately. The agent card tells peers to run this
+# server straight from GitHub, and npm blocks install scripts by default on
+# recent versions -- so a `prepare` build cannot be relied on. Shipping the
+# build means `npx github:nickthelegend/ripar-skills` works with no build step
+# and no script execution at all.

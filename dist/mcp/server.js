@@ -1,0 +1,90 @@
+/**
+ * The MCP server itself.
+ *
+ * Thin on purpose: it takes the specs from `tools.ts`, registers each one, and
+ * turns whatever the handler returned into MCP content. All the judgement lives
+ * in the tool specs and the registry reads, which are testable without a
+ * transport.
+ *
+ * Errors are returned as tool results with `isError: true` rather than thrown.
+ * A thrown error inside an MCP handler surfaces to the model as a protocol
+ * failure with no explanation; a result the model can read ("the indexer
+ * returned 503") lets it decide whether to retry or tell the user. What it must
+ * never do is let a failed chain read look like an empty one.
+ */
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { RiparRegistry } from "../registry.js";
+import { resolveConfig } from "../config.js";
+import { TOOLS } from "./tools.js";
+export const SERVER_NAME = "ripar-skills";
+export const SERVER_VERSION = "0.1.0";
+export const SERVER_INSTRUCTIONS = `
+Ripar's agent-interoperability tools, reading three registries that are live on Algorand TestNet:
+IdentityRegistry 768547159, ReputationRegistry 768559198, ValidationRegistry 768547172.
+
+Two things to know before using these:
+
+1. Every read hits the chain. There is no cache and no seed data. If a call fails, the answer is
+   unknown — do not substitute a plausible number.
+
+2. This server holds no private key. ripar_post_job returns an UNSIGNED transaction for a human or
+   wallet to sign; it submits nothing. ripar_call_endpoint cannot pay a 402 challenge on its own and
+   will hand the challenge back unless the caller supplies an already-signed payment header.
+
+A useful order for "should I use this agent?": ripar_search_agents to find it, ripar_get_reputation
+to see whether anyone has actually paid it, ripar_settlements to check the payments are real, then
+ripar_quote_endpoint before committing to anything.
+`.trim();
+export function createRiparMcpServer(opts = {}) {
+    const { registry: injected, ...configInput } = opts;
+    // When a registry is injected, its config wins for everything — including the
+    // fetch used by the x402 and transaction paths. Two different fetch
+    // implementations in one server means a test (or a proxy) can be pointed at
+    // the registry and silently miss the endpoints that spend money.
+    const config = injected?.config ?? resolveConfig(configInput);
+    const registry = injected ?? new RiparRegistry(configInput);
+    const ctx = { registry, config };
+    const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions: SERVER_INSTRUCTIONS });
+    for (const tool of TOOLS) {
+        server.registerTool(tool.name, {
+            title: tool.title,
+            description: tool.description,
+            inputSchema: tool.inputShape,
+            annotations: { title: tool.title, ...tool.annotations },
+        }, async (args) => {
+            try {
+                const result = await tool.run(args ?? {}, ctx);
+                return { content: [{ type: "text", text: stringify(result) }] };
+            }
+            catch (err) {
+                return {
+                    isError: true,
+                    content: [
+                        {
+                            type: "text",
+                            text: stringify({
+                                error: err.message,
+                                tool: tool.name,
+                                // Said explicitly so a model does not fill the gap itself.
+                                note: "this is a real failure, not an empty result — the on-chain answer is unknown",
+                            }),
+                        },
+                    ],
+                };
+            }
+        });
+    }
+    return server;
+}
+/** BigInt shows up from ABI decoding and JSON.stringify throws on it outright. */
+function stringify(value) {
+    return JSON.stringify(value, (_k, v) => (typeof v === "bigint" ? v.toString() : v), 2);
+}
+/** Run the server on stdio. stdout is the protocol channel — log to stderr only. */
+export async function startStdioServer(opts = {}) {
+    const server = createRiparMcpServer(opts);
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    return server;
+}

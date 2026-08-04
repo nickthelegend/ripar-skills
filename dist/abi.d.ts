@@ -1,0 +1,102 @@
+/**
+ * Box decoding.
+ *
+ * A box VALUE in these registries is an ARC-4 encoded struct — the same bytes
+ * the ABI method would return. So the only safe way to read one is to hand the
+ * bytes to `ABIType.from(...)` with the layout from the ARC-56 JSON. Slicing at
+ * hand-counted offsets works right up until a `string` or `byte[]` field moves,
+ * because dynamic fields live in a tail addressed by a 2-byte head offset — the
+ * struct is NOT a flat concatenation of its fields.
+ *
+ * Concretely, `AgentInfo` is 5 fields but its head is 58 bytes: 8 (uint64) + 2
+ * (offset standing in for the domain) + 32 (address) + 8 + 8, with the domain's
+ * length prefix and text appended after. Guessing that is how you end up
+ * reading an agent's domain out of the middle of its address.
+ *
+ * Every type string below is transcribed from the `structs` block of the
+ * matching `*.arc56.json`, field order included.
+ */
+import { type JobStatus } from "./config.js";
+/** IdentityRegistry `AgentInfo` — agents box map, prefix `ag_`. */
+export declare const AGENT_INFO_TYPE = "(uint64,string,address,uint64,uint64)";
+/** ReputationRegistry `Score` — scores box map, prefix `sc_`. */
+export declare const SCORE_TYPE = "(uint64,uint64,uint64,uint64,uint64,uint64,uint64)";
+/** ValidationRegistry `Job` — jobs box map, prefix `jb_`. */
+export declare const JOB_TYPE = "(uint64,address,uint64,uint64,uint64,byte[],byte[],uint64,uint64,uint64)";
+export type Agent = {
+    agentId: number;
+    /** The agent's domain, which is also where its A2A card is expected to live. */
+    domain: string;
+    /** The Algorand account that controls the record and receives x402 payments. */
+    address: string;
+    registeredAt: number;
+    updatedAt: number;
+};
+export type Score = {
+    agentId: number;
+    /** Distinct settled payments. Not a star rating — nothing here is typed by a human. */
+    jobsPaid: number;
+    /** Total USDC settled, in base units (6 decimals). */
+    volumeMicro: number;
+    validated: number;
+    disputed: number;
+    firstAt: number;
+    lastAt: number;
+};
+export type Job = {
+    jobId: number;
+    client: string;
+    serverAgentId: number;
+    validatorAgentId: number;
+    budgetMicro: number;
+    /** Hex, no `0x`. Empty string when unset. The spec itself stays offchain. */
+    specHash: string;
+    resultHash: string;
+    status: JobStatus | "unknown";
+    statusCode: number;
+    createdAt: number;
+    updatedAt: number;
+};
+/** Timestamps are unix seconds; 0 means "never happened", not "the epoch". */
+declare function isoOrNull(unixSeconds: number): string | null;
+export declare function toHex(bytes: Uint8Array): string;
+export declare function fromHex(hex: string): Uint8Array;
+export declare function decodeAgentBox(value: Uint8Array): Agent;
+export declare function decodeScoreBox(value: Uint8Array): Score;
+export declare function decodeJobBox(value: Uint8Array): Job;
+/**
+ * `dm_` and `ad_` boxes hold a bare uint64 — the agent id — so a lookup is one
+ * box read rather than a scan. 0 is the contract's "not found" sentinel and the
+ * comment on `resolve_by_domain` is explicit that callers must check it.
+ */
+export declare function decodeUint64Box(value: Uint8Array): number;
+export declare function uint64Bytes(value: number | bigint): Uint8Array;
+export declare function agentBoxName(agentId: number | bigint): Uint8Array;
+export declare function domainBoxName(domain: string): Uint8Array;
+export declare function addressBoxName(address: string): Uint8Array;
+export declare function scoreBoxName(agentId: number | bigint): Uint8Array;
+/**
+ * `txId` may be the base32 id Algorand prints, or 32 raw bytes as hex.
+ *
+ * The two forms are distinguished by length, not by character class: an
+ * unpadded base32 txid is 52 characters and hex is 64, but a base32 id made
+ * only of `A-F` and `2-7` is also valid hex, so sniffing the alphabet would
+ * occasionally decode the wrong one. Anything of another length falls through
+ * to the 32-byte check, which is the error a caller can actually act on.
+ */
+export declare function paidBoxName(txId: string | Uint8Array): Uint8Array;
+export declare function jobBoxName(jobId: number | bigint): Uint8Array;
+/**
+ * Algorand prints a txid as unpadded RFC-4648 base32 of the 32 raw bytes. The
+ * `pd_` box is keyed by those raw bytes, so the printed form has to be decoded
+ * before it can be looked up.
+ */
+export declare function base32TxIdToBytes(txId: string): Uint8Array;
+export declare function withTimestamps<T extends {
+    registeredAt?: number;
+    updatedAt?: number;
+}>(v: T): T & {
+    registeredAtIso?: string | null;
+    updatedAtIso?: string | null;
+};
+export { isoOrNull };
