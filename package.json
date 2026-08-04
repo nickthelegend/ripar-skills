@@ -7,6 +7,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
+    "ripar-skills": "./dist/bin/mcp-stdio.js",
     "ripar-skills-mcp": "./dist/bin/mcp-stdio.js"
   },
   "exports": {
@@ -38,7 +39,8 @@
     "card": "node dist/bin/serve-card.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build"
   },
   "keywords": [
     "mcp",
@@ -61,5 +63,9 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nickthelegend/ripar-skills.git"
   }
 }
