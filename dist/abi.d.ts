@@ -75,16 +75,6 @@ export declare function agentBoxName(agentId: number | bigint): Uint8Array;
 export declare function domainBoxName(domain: string): Uint8Array;
 export declare function addressBoxName(address: string): Uint8Array;
 export declare function scoreBoxName(agentId: number | bigint): Uint8Array;
-/**
- * `txId` may be the base32 id Algorand prints, or 32 raw bytes as hex.
- *
- * The two forms are distinguished by length, not by character class: an
- * unpadded base32 txid is 52 characters and hex is 64, but a base32 id made
- * only of `A-F` and `2-7` is also valid hex, so sniffing the alphabet would
- * occasionally decode the wrong one. Anything of another length falls through
- * to the 32-byte check, which is the error a caller can actually act on.
- */
-export declare function paidBoxName(txId: string | Uint8Array): Uint8Array;
 export declare function jobBoxName(jobId: number | bigint): Uint8Array;
 /**
  * Algorand prints a txid as unpadded RFC-4648 base32 of the 32 raw bytes. The

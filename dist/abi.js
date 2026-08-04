@@ -138,34 +138,17 @@ export function addressBoxName(address) {
 export function scoreBoxName(agentId) {
     return withPrefix(BOX_PREFIX.score, uint64Bytes(agentId));
 }
-/**
- * `txId` may be the base32 id Algorand prints, or 32 raw bytes as hex.
+/* paidBoxName() is gone with the box it named.
  *
- * The two forms are distinguished by length, not by character class: an
- * unpadded base32 txid is 52 characters and hex is 64, but a base32 id made
- * only of `A-F` and `2-7` is also valid hex, so sniffing the alphabet would
- * occasionally decode the wrong one. Anything of another length falls through
- * to the 32-byte check, which is the error a caller can actually act on.
+ * The ReputationRegistry kept a `pd_` + txid box per counted payment, as replay
+ * protection. Keying it on the txid was in fact impossible — the box name
+ * depends on the txid, which depends on the group id, which depends on the app
+ * call, which must declare the box — and unnecessary: the payment is a
+ * transaction in the same group, so consensus already rejects a duplicate.
+ *
+ * Anything reading these boxes now gets an empty answer that looks like a real
+ * one, which is why the readers went too. See registry.ts.
  */
-export function paidBoxName(txId) {
-    let raw;
-    if (typeof txId !== "string") {
-        raw = txId;
-    }
-    else if (txId.length === 52) {
-        raw = base32TxIdToBytes(txId);
-    }
-    else if (txId.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(txId)) {
-        raw = fromHex(txId);
-    }
-    else {
-        raw = base32TxIdToBytes(txId);
-    }
-    if (raw.length !== 32) {
-        throw new Error(`A payment txid must be 32 bytes, got ${raw.length}`);
-    }
-    return withPrefix(BOX_PREFIX.paid, raw);
-}
 export function jobBoxName(jobId) {
     return withPrefix(BOX_PREFIX.job, uint64Bytes(jobId));
 }

@@ -43,7 +43,6 @@ export {
   domainBoxName,
   addressBoxName,
   scoreBoxName,
-  paidBoxName,
   jobBoxName,
   base32TxIdToBytes,
   uint64Bytes,

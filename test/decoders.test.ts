@@ -4,7 +4,7 @@
  * The fixtures are not invented. Every base64 blob below was captured from
  * Algorand TestNet with
  *
- *   curl "https://testnet-api.algonode.cloud/v2/applications/768547159/box?name=b64:YWdfAAAAAAAAAAE="
+ *   curl "https://testnet-api.algonode.cloud/v2/applications/768570170/box?name=b64:YWdfAAAAAAAAAAE="
  *
  * so a decoder that drifts from what the deployed contracts actually write
  * fails here, offline, instead of returning confident nonsense at runtime.
@@ -27,7 +27,6 @@ import {
   domainBoxName,
   fromHex,
   jobBoxName,
-  paidBoxName,
   scoreBoxName,
   uint64Bytes,
 } from "../src/abi.js";
@@ -37,20 +36,20 @@ import { REGISTRY_APP_IDS, jobStatusName } from "../src/config.js";
 const b64 = (s: string) => new Uint8Array(Buffer.from(s, "base64"));
 const hex = (u: Uint8Array) => Buffer.from(u).toString("hex");
 
-/** IdentityRegistry 768547159, box `ag_` + uint64(1). */
+/** IdentityRegistry 768570170, box `ag_` + uint64(1). */
 const AGENT_1_BOX =
-  "AAAAAAAAAAEAOqBDx7Zz+JG0QlruWQjwZq4wILotkFdOWVQ1+BBnam8dAAAAAGpxemIAAAAAanF6YgAcYWdlbnQtMTc4NTgyMTc5NjUyNS5yaXBhci5pbw==";
-/** ReputationRegistry 768559198, box `sc_` + uint64(1). */
+  "AAAAAAAAAAEAOlBHHKthrrBUpBWu5dvDA7U5EY0eIO91MNt3AEq8gxEmAAAAAGpyCP4AAAAAanII/gAWcmlwYXItYWdlbnQudmVyY2VsLmFwcA==";
+/** ReputationRegistry 768570171, box `sc_` + uint64(1). */
 const SCORE_1_BOX =
-  "AAAAAAAAAAEAAAAAAAAAAQAAAAAAACcQAAAAAAAAAAAAAAAAAAAAAAAAAABqcXpyAAAAAGpxenI=";
-/** ValidationRegistry 768547172, box `jb_` + uint64(1). */
+  "AAAAAAAAAAEAAAAAAAAAAQAAAAAAACcQAAAAAAAAAAAAAAAAAAAAAAAAAABqcgkIAAAAAGpyCQg=";
+/** ValidationRegistry 768570174, box `jb_` + uint64(1). */
 const JOB_1_BOX =
-  "AAAAAAAAAAGgQ8e2c/iRtEJa7lkI8GauMCC6LZBXTllUNfgQZ2pvHQAAAAAAAAABAAAAAAAAAAAAAAAAACYloABcAH4AAAAAAAAAAQAAAABqcXpoAAAAAGpxem0AIF1qfAU9ro4BMEFM18o7ewedKI8q/P1p2l6t1E8Wzkj2AAA=";
+  "AAAAAAAAAAFQRxyrYa6wVKQVruXbwwO1ORGNHiDvdTDbdwBKvIMRJgAAAAAAAAABAAAAAAAAAAIAAAAAAA9CQABcAH4AAAAAAAAAAwAAAABqcgkOAAAAAGpyCR4AIAcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHACAJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQ==";
 /** `dm_agent-1785821796525.ripar.io` and `ad_<pubkey>` both hold a bare uint64. */
 const POINTER_BOX = "AAAAAAAAAAE=";
 
-const AGENT_1_ADDRESS = "UBB4PNTT7CI3IQS25ZMQR4DGVYYCBORNSBLU4WKUGX4BAZ3KN4O2KATPAU";
-const AGENT_1_DOMAIN = "agent-1785821796525.ripar.io";
+const AGENT_1_ADDRESS = "KBDRZK3BV2YFJJAVV3S5XQYDWU4RDDI6EDXXKMG3O4AEVPEDCETDKEISKQ";
+const AGENT_1_DOMAIN = "ripar-agent.vercel.app";
 
 describe("AgentInfo decoding", () => {
   it("reads every field out of a real IdentityRegistry box", () => {
@@ -59,8 +58,8 @@ describe("AgentInfo decoding", () => {
       agentId: 1,
       domain: AGENT_1_DOMAIN,
       address: AGENT_1_ADDRESS,
-      registeredAt: 1785821794,
-      updatedAt: 1785821794,
+      registeredAt: 1785858302,
+      updatedAt: 1785858302,
     });
   });
 
@@ -109,8 +108,8 @@ describe("Score decoding", () => {
       volumeMicro: 10_000,
       validated: 0,
       disputed: 0,
-      firstAt: 1785821810,
-      lastAt: 1785821810,
+      firstAt: 1785858312,
+      lastAt: 1785858312,
     });
   });
 
@@ -139,17 +138,17 @@ describe("Job decoding", () => {
     expect(job.jobId).toBe(1);
     expect(job.client).toBe(AGENT_1_ADDRESS);
     expect(job.serverAgentId).toBe(1);
-    expect(job.validatorAgentId).toBe(0);
-    expect(job.budgetMicro).toBe(2_500_000);
-    expect(job.specHash).toBe(
-      "5d6a7c053dae8e0130414cd7ca3b7b079d288f2afcfd69da5eadd44f16ce48f6"
-    );
+    expect(job.validatorAgentId).toBe(2);
+    expect(job.budgetMicro).toBe(1_000_000);
+    // deploy-v2.mjs drove this job through the whole lifecycle while proving
+    // the authorisation fixes, so both hashes are populated and it ended
+    // VALIDATED — judged by agent 2, the named validator, and by nobody else.
+    expect(job.specHash).toBe("07".repeat(32));
     // The contract asserts spec_hash is a 32-byte sha256 digest.
     expect(job.specHash).toHaveLength(64);
-    // Not yet submitted, so result_hash is genuinely empty.
-    expect(job.resultHash).toBe("");
-    expect(job.statusCode).toBe(1);
-    expect(job.status).toBe("assigned");
+    expect(job.resultHash).toBe("09".repeat(32));
+    expect(job.statusCode).toBe(3);
+    expect(job.status).toBe("validated");
   });
 
   it("maps every status code the contract can write", () => {
@@ -200,13 +199,13 @@ describe("box names", () => {
   });
 
   it("matches the box names algod actually returns", () => {
-    // These are the exact names from GET /v2/applications/768547159/boxes.
+    // These are the exact names from GET /v2/applications/768570170/boxes.
     expect(Buffer.from(agentBoxName(1)).toString("base64")).toBe("YWdfAAAAAAAAAAE=");
     expect(Buffer.from(domainBoxName(AGENT_1_DOMAIN)).toString("base64")).toBe(
-      "ZG1fYWdlbnQtMTc4NTgyMTc5NjUyNS5yaXBhci5pbw=="
+      "ZG1fcmlwYXItYWdlbnQudmVyY2VsLmFwcA=="
     );
     expect(Buffer.from(addressBoxName(AGENT_1_ADDRESS)).toString("base64")).toBe(
-      "YWRfoEPHtnP4kbRCWu5ZCPBmrjAgui2QV05ZVDX4EGdqbx0="
+      "YWRfUEccq2GusFSkFa7l28MDtTkRjR4g73Uw23cASryDESY="
     );
   });
 
@@ -223,33 +222,17 @@ describe("box names", () => {
     expect(hex(name.slice(3))).toBe(hex(algosdk.decodeAddress(AGENT_1_ADDRESS).publicKey));
   });
 
-  it("converts a printed txid to the exact raw bytes the pd_ box is keyed by", () => {
-    // Captured live: GET /v2/applications/768559198/boxes returned the box name
-    // cGRf0Ut5G6mdZtIITc44djsiUNC2wjtE+x68lFJW2S5pycg=, whose 32-byte tail is
-    // the transaction Algorand prints as PRINTED_TXID below.
-    const boxName = b64("cGRf0Ut5G6mdZtIITc44djsiUNC2wjtE+x68lFJW2S5pycg=");
-    const rawTxid = boxName.slice(3);
-    const PRINTED_TXID = "2FFXSG5JTVTNECCNZY4HMOZCKDILNQR3IT5R5PEUKJLNSLTJZHEA";
+  /* The two tests that stood here covered paidBoxName(), which built a
+   * `pd_` + txid box name. Both the helper and the box are gone: the
+   * ReputationRegistry kept one per counted payment as replay protection, but
+   * keying it on the txid was circular (the name depends on the txid, which
+   * depends on the group id, which depends on the app call, which must declare
+   * the box) and unnecessary — the payment is a transaction in the same group,
+   * so consensus already rejects a duplicate.
+   *
+   * scoreBoxName and agentBoxName below still cover the uint64 box-name path
+   * these shared. */
 
-    expect(hex(rawTxid)).toBe(
-      "d14b791ba99d66d2084dce38763b2250d0b6c23b44fb1ebc945256d92e69c9c8"
-    );
-    expect(hex(base32TxIdToBytes(PRINTED_TXID))).toBe(hex(rawTxid));
-    // And going the whole way: the printed id rebuilds the exact box name.
-    expect(Buffer.from(paidBoxName(PRINTED_TXID)).toString("base64")).toBe(
-      "cGRf0Ut5G6mdZtIITc44djsiUNC2wjtE+x68lFJW2S5pycg="
-    );
-  });
-
-  it("accepts a payment id as printed base32 or as hex, and rejects the wrong length", () => {
-    const txId = "2FFXSG5JTVTNECCNZY4HMOZCKDILNQR3IT5R5PEUKJLNSLTJZHEA";
-    const fromBase32 = paidBoxName(txId);
-    expect(fromBase32.length).toBe(3 + 32);
-    const asHex = hex(fromBase32.slice(3));
-    expect(hex(paidBoxName(asHex).slice(3))).toBe(asHex);
-    // Short hex is a caller mistake, and the message has to say which mistake.
-    expect(() => paidBoxName("00ff")).toThrow(/32 bytes/);
-  });
 });
 
 describe("USDC formatting", () => {
@@ -290,7 +273,7 @@ describe("RiparRegistry wiring", () => {
     await expect(broken.getAgent(1)).rejects.toThrow(/503/);
   });
 
-  it("filters box listings by prefix so sc_ boxes never leak into pd_ results", async () => {
+  it("filters box listings by prefix so ag_ boxes never leak into sc_ results", async () => {
     const registry = new RiparRegistry({
       fetch: (async (url: string) => {
         if (url.includes("/boxes")) {
@@ -307,8 +290,10 @@ describe("RiparRegistry wiring", () => {
         throw new Error(`unexpected fetch: ${url}`);
       }) as unknown as typeof fetch,
     });
-    const counted = await registry.countedPaymentIds();
-    expect(counted).toEqual(["d14b791ba99d66d2084dce38763b2250d0b6c23b44fb1ebc945256d92e69c9c8"]);
+    const counted = await registry.listBoxNames(registry.config.appIds.reputation!, "sc_");
+    // Only the sc_ box comes back; the ag_ one is filtered out.
+      expect(counted).toHaveLength(1);
+      expect(Buffer.from(counted[0]!).toString("base64")).toBe("c2NfAAAAAAAAAAE=");
   });
 
   /**
@@ -318,8 +303,8 @@ describe("RiparRegistry wiring", () => {
    */
   it("follows next-token instead of asking for a max it would be refused for", async () => {
     const pages: Record<string, unknown> = {
-      "1": { boxes: [{ name: "cGRfAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" }], "next-token": "b64:cursor" },
-      "2": { boxes: [{ name: "cGRf0Ut5G6mdZtIITc44djsiUNC2wjtE+x68lFJW2S5pycg=" }] },
+      "1": { boxes: [{ name: "c2NfAAAAAAAAAAE=" }], "next-token": "b64:cursor" },
+      "2": { boxes: [{ name: "c2NfAAAAAAAAAAI=" }] },
     };
     const urls: string[] = [];
     const registry = new RiparRegistry({
@@ -330,14 +315,14 @@ describe("RiparRegistry wiring", () => {
       }) as unknown as typeof fetch,
     });
 
-    const counted = await registry.countedPaymentIds();
+    const counted = await registry.listBoxNames(registry.config.appIds.reputation!, "sc_");
     expect(counted).toHaveLength(2);
     expect(urls).toHaveLength(2);
     // `max=` is the parameter that 400s; it must never be sent.
     expect(urls.every((u) => !u.includes("max="))).toBe(true);
     expect(urls[0]).toContain("limit=");
     // The prefix is pushed to the server rather than filtered after the fact.
-    expect(urls[0]).toContain(`prefix=${encodeURIComponent("b64:cGRf")}`);
+    expect(urls[0]).toContain(`prefix=${encodeURIComponent("b64:c2Nf")}`);
     expect(urls[1]).toContain("next=");
   });
 
@@ -345,62 +330,67 @@ describe("RiparRegistry wiring", () => {
     const registry = new RiparRegistry({
       fetch: (async () =>
         new Response(
-          JSON.stringify({ boxes: [{ name: "cGRfAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" }], "next-token": "b64:forever" }),
+          JSON.stringify({ boxes: [{ name: "c2NfAAAAAAAAAAE=" }], "next-token": "b64:forever" }),
           { status: 200 }
         )) as unknown as typeof fetch,
     });
-    await expect(registry.countedPaymentIds()).rejects.toThrow(/partial list/i);
+    await expect(
+        registry.listBoxNames(registry.config.appIds.reputation!, "sc_")
+      ).rejects.toThrow(/partial list/i);
   });
 
-  /**
-   * The settlement join is only meaningful if BOTH halves were read. A failed
-   * `pd_` listing that came back as an empty set would mark every real payment
-   * uncredited and invent a reputation gap that is not there.
-   */
-  it("refuses to report a settlement join when the credited-payments read failed", async () => {
-    const registry = new RiparRegistry({
-      fetch: (async (url: string) => {
-        if (url.includes("/boxes")) {
-          return new Response("nope", { status: 503, statusText: "Service Unavailable" });
-        }
-        if (url.includes("/box?")) return new Response(JSON.stringify({ value: "AAAAAAAAAAE=" }), { status: 200 });
-        return new Response(JSON.stringify({ transactions: [] }), { status: 200 });
-      }) as unknown as typeof fetch,
-    });
-    await expect(registry.settlements({ address: AGENT_1_ADDRESS })).rejects.toThrow(
-      /could not read the reputationregistry/i
-    );
-  });
+  /* The test that stood here checked that a failed `pd_` listing threw rather
+   * than coming back as an empty set and marking every real payment
+   * uncredited. settlements() no longer makes that listing — the box is gone —
+   * so there is nothing left to fail in that particular way.
+   *
+   * The read it DOES make is the score box, and a missing one is null rather
+   * than zeros: never paid and paid-but-scored-nothing are different claims.
+   * Covered below. */
 });
 
-describe("settlements: the join between transfers and credited payments", () => {
-  const PAID_TXID = "2FFXSG5JTVTNECCM3Y4HMOZCKDILNQR3IT5R5PEUKJLNSLTJZHEA";
-  const UNPAID_TXID = "AAFXSG5JTVTNECCM3Y4HMOZCKDILNQR3IT5R5PEUKJLNSLTJZHEA";
+describe("settlements: transfers, plus the score the chain records", () => {
+  const TXID_A = "2FFXSG5JTVTNECCM3Y4HMOZCKDILNQR3IT5R5PEUKJLNSLTJZHEA";
+  const TXID_B = "AAFXSG5JTVTNECCM3Y4HMOZCKDILNQR3IT5R5PEUKJLNSLTJZHEA";
 
-  function stubbed() {
-    const creditedName = Buffer.from(paidBoxName(PAID_TXID)).toString("base64");
+  // agent_id 1, jobs_paid 3, volume 35000, validated 0, disputed 0, timestamps.
+  const SCORE_BOX = "AAAAAAAAAAEAAAAAAAAAAwAAAAAAAIi4AAAAAAAAAAAAAAAAAAAAAAAAAABlU/EAAAAAAGVT8WQ=";
+
+  /**
+   * There used to be a per-transfer `countedInReputation` flag, joined from a
+   * `pd_` box the ReputationRegistry wrote for every credited payment. That box
+   * is gone, so the flag cannot be computed — and computing it as false for
+   * everything would have reported every payment as an uncredited gap, which is
+   * a lie in the shape of an answer.
+   *
+   * What replaces it is the score, which is what the chain actually records
+   * about credited work.
+   */
+  function stubbed(opts: { score?: string | null } = {}) {
+    const score = opts.score === undefined ? SCORE_BOX : opts.score;
     return new RiparRegistry({
       fetch: (async (url: string) => {
-        if (url.includes("/v2/applications/") && url.includes("/box?")) {
-          // ad_ lookup -> agent 1
+        if (url.includes("/box?")) {
+          // sc_ is the score read; anything else is the ad_ -> agent 1 index.
+          if (url.includes(encodeURIComponent("b64:c2Nf"))) {
+            if (score === null) return new Response("no box", { status: 404 });
+            return new Response(JSON.stringify({ value: score }), { status: 200 });
+          }
           return new Response(JSON.stringify({ value: "AAAAAAAAAAE=" }), { status: 200 });
-        }
-        if (url.includes("/boxes")) {
-          return new Response(JSON.stringify({ boxes: [{ name: creditedName }] }), { status: 200 });
         }
         if (url.includes("/v2/accounts/")) {
           return new Response(
             JSON.stringify({
               transactions: [
                 {
-                  id: PAID_TXID,
+                  id: TXID_A,
                   sender: "CLIENTADDRESS",
                   "confirmed-round": 100,
                   "round-time": 1_700_000_000,
                   "asset-transfer-transaction": { amount: 10_000, receiver: AGENT_1_ADDRESS },
                 },
                 {
-                  id: UNPAID_TXID,
+                  id: TXID_B,
                   sender: "CLIENTADDRESS",
                   "confirmed-round": 101,
                   "round-time": 1_700_000_100,
@@ -416,21 +406,24 @@ describe("settlements: the join between transfers and credited payments", () => 
     });
   }
 
-  it("marks exactly the payments the registry has already credited", async () => {
+  it("reports the transfers and the agent's score alongside them", async () => {
     const result = await stubbed().settlements({ address: AGENT_1_ADDRESS });
-    const byId = Object.fromEntries(result.transfers.map((t) => [t.txId, t]));
 
-    expect(byId[PAID_TXID]!.countedInReputation).toBe(true);
-    expect(byId[UNPAID_TXID]!.countedInReputation).toBe(false);
-
-    expect(result.totals).toEqual({
-      received: 2,
-      sent: 0,
-      receivedUsdc: "0.035000",
-      countedReceived: 1,
-    });
+    expect(result.transfers).toHaveLength(2);
+    expect(result.totals).toEqual({ received: 2, sent: 0, receivedUsdc: "0.035000" });
     expect(result.asset.id).toBe(10458941);
     expect(result.agentId).toBe(1);
+    expect(result.score?.jobsPaid).toBe(3);
+
+    // No transfer carries a credit flag, because the chain records none.
+    expect(result.transfers.every((t) => !("countedInReputation" in t))).toBe(true);
+  });
+
+  it("returns a null score rather than zeros when the agent has never been paid", async () => {
+    // A missing box and a box of zeros are different claims: never paid, versus
+    // paid and scored nothing. Only the first is true here.
+    const result = await stubbed({ score: null }).settlements({ address: AGENT_1_ADDRESS });
+    expect(result.score).toBeNull();
   });
 
   it("needs an address or an agent id and says so rather than returning nothing", async () => {

@@ -128,10 +128,11 @@ export const reputationReportSkill: Skill<typeof reputationInput> = {
   name: "Reputation report",
   description:
     "Read an agent's on-chain score: payments credited to it, total USDC, and how many results a " +
-    "validator passed or disputed. Nothing here is a star rating — each credit is keyed to a " +
-    "payment transaction id and the contract refuses to count the same id twice. It does NOT " +
-    "verify that the id names a real transfer, so a score is a claim the chain records, not a " +
-    "claim the chain proves. Use ripar.settlement.audit to check it against the indexer.",
+    "validator passed or disputed. Nothing here is a star rating. A credit requires the settling " +
+    "USDC transfer to be a transaction in the same atomic group, going FROM the client's " +
+    "registered address TO the server's — both resolved through the IdentityRegistry — so the " +
+    "amount is read off a transfer the AVM has already validated and cannot be fabricated. " +
+    "Use ripar.settlement.audit to cross-check the score against the indexer.",
   tags: ["reputation", "registry", "trust", "algorand"],
   examples: ["What is agent 1's track record?", "Has anyone actually paid this agent?"],
   input: reputationInput,
@@ -203,7 +204,7 @@ export const settlementAuditSkill: Skill<typeof settlementInput> = {
     "only visible because the two sources are read together.",
   tags: ["x402", "settlement", "reputation", "audit"],
   examples: [
-    "Which of agent 1's payments have not been credited to its score yet?",
+    "Which of agent 1's payments could be credited to its score?",
     "How much USDC has this agent actually received?",
   ],
   input: settlementInput,
@@ -214,30 +215,45 @@ export const settlementAuditSkill: Skill<typeof settlementInput> = {
       address: input.address,
       limit: input.limit,
     });
-    // Only transfers the contract would actually accept count as a gap.
-    // `accept_feedback` asserts `amount_micro > 0` and `server != client`, so a
-    // zero-amount ASA opt-in — which is an inbound transfer from yourself, and
-    // the first thing in every agent's history — can never be credited. Listing
-    // it as uncredited reputation produced a next step that was impossible to
-    // follow and a gap that was not real.
+    // Inbound transfers the contract COULD credit. accept_feedback asserts the
+    // amount is above zero and that the two agent ids differ, so a zero-amount
+    // ASA opt-in — an inbound transfer from yourself, and the first thing in
+    // every agent's history — can never be credited. Listing it as a reputation
+    // gap produced a next step impossible to follow.
+    //
+    // What this can no longer say is WHICH of the eligible ones were already
+    // credited. The registry used to keep a `pd_` box per counted payment and
+    // this filtered on it; that ledger is gone, because keying it on the txid
+    // was circular and unnecessary — the payment is a transaction in the same
+    // group, and consensus rejects a duplicate txid.
+    //
+    // So `score` is the chain's record of credited work and `creditable` is
+    // what a caller could still submit. They overlap; they are not
+    // complementary. Leaving the old filter in place would have reported every
+    // payment as uncredited — a lie in the shape of an answer.
     const inbound = result.transfers.filter((t) => t.direction === "in");
-    const uncredited = inbound.filter(
-      (t) => !t.countedInReputation && t.amountMicro > 0 && t.counterparty !== result.address
-    );
+    const eligible = inbound.filter((t) => t.amountMicro > 0 && t.counterparty !== result.address);
     const ineligible = inbound.filter(
-      (t) => !t.countedInReputation && (t.amountMicro === 0 || t.counterparty === result.address)
+      (t) => t.amountMicro === 0 || t.counterparty === result.address
     );
 
     return {
       ...result,
-      uncredited: {
-        count: uncredited.length,
-        totalUsdc: microToUsdc(uncredited.reduce((s, t) => s + t.amountMicro, 0)),
-        txIds: uncredited.map((t) => t.txId),
+      creditable: {
+        count: eligible.length,
+        totalUsdc: microToUsdc(eligible.reduce((s, t) => s + t.amountMicro, 0)),
+        txIds: eligible.map((t) => t.txId),
+        // The CURRENT signature. accept_feedback takes the settling transfer as
+        // a transaction in the group, not a txid and an amount as arguments —
+        // that change is what stopped scores being minted from bytes, and a
+        // caller following the old signature is rejected outright.
         nextStep:
-          uncredited.length > 0
-            ? "call accept_feedback(server_agent_id, client_agent_id, payment_txid, amount_micro) on the ReputationRegistry for each of these"
-            : "every inbound payment in this window that could be credited already has been",
+          eligible.length > 0
+            ? "group the USDC transfer with a call to accept_feedback(payment: axfer, server_agent_id, client_agent_id). The transfer must go FROM the client's registered address TO the server's, or the call is rejected."
+            : "nothing in this window is creditable",
+        note:
+          "The chain records no per-payment credit flag, so this is what COULD be credited, " +
+          "not what has not been. `score` is the record of what already was.",
       },
       ...(ineligible.length
         ? {

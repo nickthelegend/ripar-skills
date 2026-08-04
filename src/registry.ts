@@ -17,7 +17,6 @@ import {
   decodeUint64Box,
   domainBoxName,
   jobBoxName,
-  paidBoxName,
   scoreBoxName,
   type Agent,
   type Job,
@@ -227,16 +226,19 @@ export class RiparRegistry {
   }
 
   /** Which agent a payment was credited to, or 0 if it was never counted. */
-  async wasCounted(txId: string): Promise<number> {
-    const raw = await this.readBox(this.appId("reputation"), paidBoxName(txId));
-    return raw ? decodeUint64Box(raw) : 0;
-  }
-
-  /** Every payment id the reputation registry has already credited. */
-  async countedPaymentIds(): Promise<string[]> {
-    const names = await this.listBoxNames(this.appId("reputation"), BOX_PREFIX.paid);
-    return names.map((n) => Buffer.from(n.slice(BOX_PREFIX.paid.length)).toString("hex"));
-  }
+  // wasCounted() and countedPaymentIds() are deliberately absent.
+  //
+  // They read `pd_` boxes listing every payment already folded into a score.
+  // The ReputationRegistry no longer writes them: keying a replay ledger on the
+  // txid was impossible (the box name depends on the txid, which depends on the
+  // group id, which depends on the app call, which must declare the box) and
+  // unnecessary (the payment is a transaction in the same group, and consensus
+  // rejects a duplicate txid).
+  //
+  // So "has this transfer been credited?" is not a question the chain can
+  // answer, and returning false for everything would have been a lie with the
+  // shape of an answer. What IS on chain is the score itself — getScore(id)
+  // gives jobs_paid and volume_micro.
 
   // ------------------------------------------------------------ validation
 
@@ -284,7 +286,10 @@ export class RiparRegistry {
     agentId: number | null;
     asset: { id: number; symbol: string; decimals: number };
     transfers: Settlement[];
-    totals: { received: number; sent: number; receivedUsdc: string; countedReceived: number };
+    totals: { received: number; sent: number; receivedUsdc: string };
+    /** The agent's score, when it has one. This is what the chain records about
+     *  credited work — there is no per-transfer credit flag to read. */
+    score: Score | null;
     explorer: string;
   }> {
     const limit = opts.limit ?? 25;
@@ -309,20 +314,13 @@ export class RiparRegistry {
         `?asset-id=${assetId}&tx-type=axfer&limit=${Math.min(limit, 100)}`
     );
 
-    // NOT wrapped in a catch. If the `pd_` listing fails, every transfer would
-    // silently come back countedInReputation:false and the audit would report
-    // already-credited payments as an uncredited gap — a failed read wearing an
-    // empty read's clothes, which is the one thing this module refuses to do.
-    let counted: Set<string>;
-    try {
-      counted = new Set(await this.countedPaymentIds());
-    } catch (err) {
-      throw new RiparReadError(
-        `Could not read the ReputationRegistry's credited payments, so no transfer can be ` +
-          `truthfully marked counted or uncounted: ${(err as Error).message}`,
-        err instanceof RiparReadError ? err.code : "network"
-      );
-    }
+    // The score is the chain's record of credited work, read here rather than
+    // derived from the transfers below — no transfer carries a "was this
+    // credited" flag, and none can be inferred. The registry used to keep a
+    // `pd_` box per counted payment and this method used it to mark each
+    // transfer; that ledger is gone, deliberately, so the honest thing is to
+    // report the score and not to guess per transfer.
+    const score = agentId !== null ? await this.getScore(agentId) : null;
 
     const transfers: Settlement[] = (body.transactions ?? []).map((t) => {
       const xfer = t["asset-transfer-transaction"];
@@ -337,8 +335,6 @@ export class RiparRegistry {
         round: Number(t["confirmed-round"] ?? 0),
         timestamp: t["round-time"] ? new Date(t["round-time"] * 1000).toISOString() : null,
         note: decodeNote(t.note),
-        /** True when this exact transfer has already been folded into a score. */
-        countedInReputation: counted.has(txIdToHex(t.id)),
         explorer: explorerTxUrl(this.config, t.id),
       };
     });
@@ -348,12 +344,12 @@ export class RiparRegistry {
       received: received.length,
       sent: transfers.length - received.length,
       receivedUsdc: microToUsdc(received.reduce((s, t) => s + t.amountMicro, 0)),
-      countedReceived: received.filter((t) => t.countedInReputation).length,
     };
 
     return {
       address,
       agentId,
+      score,
       asset: { id: assetId, symbol: "USDC", decimals: USDC_DECIMALS },
       transfers,
       totals,
@@ -371,7 +367,6 @@ export type Settlement = {
   round: number;
   timestamp: string | null;
   note: string | null;
-  countedInReputation: boolean;
   explorer: string;
 };
 

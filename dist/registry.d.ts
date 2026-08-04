@@ -53,9 +53,6 @@ export declare class RiparRegistry {
     /** null when the agent has never been paid — an absent box, not a zero score. */
     getScore(agentId: number): Promise<Score | null>;
     /** Which agent a payment was credited to, or 0 if it was never counted. */
-    wasCounted(txId: string): Promise<number>;
-    /** Every payment id the reputation registry has already credited. */
-    countedPaymentIds(): Promise<string[]>;
     totalJobs(): Promise<number>;
     getJob(jobId: number): Promise<Job | null>;
     listJobs(opts?: {
@@ -91,8 +88,10 @@ export declare class RiparRegistry {
             received: number;
             sent: number;
             receivedUsdc: string;
-            countedReceived: number;
         };
+        /** The agent's score, when it has one. This is what the chain records about
+         *  credited work — there is no per-transfer credit flag to read. */
+        score: Score | null;
         explorer: string;
     }>;
 }
@@ -105,7 +104,6 @@ export type Settlement = {
     round: number;
     timestamp: string | null;
     note: string | null;
-    countedInReputation: boolean;
     explorer: string;
 };
 export declare function microToUsdc(micro: number): string;

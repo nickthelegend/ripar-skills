@@ -10,9 +10,9 @@ export type Network = "testnet" | "mainnet";
 /** The three Ripar registries. TestNet is the only network they exist on today. */
 export declare const REGISTRY_APP_IDS: {
     readonly testnet: {
-        readonly identity: 768547159;
-        readonly reputation: 768559198;
-        readonly validation: 768547172;
+        readonly identity: 768570170;
+        readonly reputation: 768570171;
+        readonly validation: 768570174;
     };
 };
 export type RegistryName = keyof (typeof REGISTRY_APP_IDS)["testnet"];

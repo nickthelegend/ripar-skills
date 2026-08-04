@@ -208,10 +208,17 @@ describe("ripar.reputation.report", () => {
 });
 
 describe("ripar.settlement.audit", () => {
-  it("reports the uncredited payments and what to do about them", async () => {
+  it("reports what could be credited, and how", async () => {
     const registry = new RiparRegistry({
       fetch: (async (url: string) => {
-        if (url.includes("/box?")) return new Response(JSON.stringify({ value: "AAAAAAAAAAE=" }), { status: 200 });
+        if (url.includes("/box?")) {
+            // sc_ is the score read; anything else is the ad_ -> agent 1 index.
+            // A bare uint64 is not a valid Score, so they cannot share a stub.
+            const value = url.includes(encodeURIComponent("b64:c2Nf"))
+              ? "AAAAAAAAAAEAAAAAAAAAAQAAAAAAACcQAAAAAAAAAAAAAAAAAAAAAAAAAABqcgkIAAAAAGpyCQg="
+              : "AAAAAAAAAAE=";
+            return new Response(JSON.stringify({ value }), { status: 200 });
+          }
         if (url.includes("/boxes")) return new Response(JSON.stringify({ boxes: [] }), { status: 200 });
         if (url.includes("/v2/accounts/")) {
           return new Response(
@@ -236,9 +243,16 @@ describe("ripar.settlement.audit", () => {
       { registry, config: registry.config }
     )) as any;
 
-    expect(result.uncredited.count).toBe(1);
-    expect(result.uncredited.totalUsdc).toBe("0.010000");
-    expect(result.uncredited.nextStep).toMatch(/accept_feedback/);
+    expect(result.creditable.count).toBe(1);
+    expect(result.creditable.totalUsdc).toBe("0.010000");
+    // The CURRENT signature. accept_feedback takes the settling transfer as a
+    // transaction in the group, not a txid and an amount as arguments — a
+    // caller following the old one is rejected outright.
+    expect(result.creditable.nextStep).toMatch(/accept_feedback\(payment: axfer/);
+    // And it must not claim these are UNcredited. The chain records no
+    // per-payment credit flag, so that is not a knowable thing to say.
+    expect(result.creditable.note).toMatch(/could be credited, not what has not been/i);
+    expect(result.score?.jobsPaid).toBe(1);
   });
 
   /**
@@ -247,10 +261,17 @@ describe("ripar.settlement.audit", () => {
    * payee differ, so crediting one is impossible — reporting it as a gap gave
    * the caller a next step it could not follow.
    */
-  it("does not count a zero-amount self opt-in as an uncredited payment", async () => {
+  it("does not count a zero-amount self opt-in as creditable", async () => {
     const registry = new RiparRegistry({
       fetch: (async (url: string) => {
-        if (url.includes("/box?")) return new Response(JSON.stringify({ value: "AAAAAAAAAAE=" }), { status: 200 });
+        if (url.includes("/box?")) {
+            // sc_ is the score read; anything else is the ad_ -> agent 1 index.
+            // A bare uint64 is not a valid Score, so they cannot share a stub.
+            const value = url.includes(encodeURIComponent("b64:c2Nf"))
+              ? "AAAAAAAAAAEAAAAAAAAAAQAAAAAAACcQAAAAAAAAAAAAAAAAAAAAAAAAAABqcgkIAAAAAGpyCQg="
+              : "AAAAAAAAAAE=";
+            return new Response(JSON.stringify({ value }), { status: 200 });
+          }
         if (url.includes("/boxes")) return new Response(JSON.stringify({ boxes: [] }), { status: 200 });
         if (url.includes("/v2/accounts/")) {
           return new Response(
@@ -276,8 +297,11 @@ describe("ripar.settlement.audit", () => {
       { registry, config: registry.config }
     )) as any;
 
-    expect(result.uncredited.count).toBe(0);
-    expect(result.uncredited.nextStep).not.toMatch(/accept_feedback/);
+    expect(result.creditable.count).toBe(0);
+    expect(result.creditable.nextStep).not.toMatch(/accept_feedback/);
+    // It is reported as ineligible rather than silently dropped: the caller
+    // sees the transfer and why it can never be credited.
+    expect(result.ineligible.count).toBe(1);
     expect(result.ineligible.count).toBe(1);
     expect(result.ineligible.reason).toMatch(/opt-in/i);
   });

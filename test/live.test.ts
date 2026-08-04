@@ -28,7 +28,7 @@ const describeLive = skip ? describe.skip : describe;
 const registry = new RiparRegistry();
 
 describeLive("live TestNet registries", () => {
-  it("reads agent_count out of IdentityRegistry 768547159", async () => {
+  it("reads agent_count out of IdentityRegistry 768570170", async () => {
     const total = await registry.totalAgents();
     expect(typeof total).toBe("number");
     // The registry has been exercised, so at least one agent exists.
@@ -64,7 +64,7 @@ describeLive("live TestNet registries", () => {
     expect(await registry.getAgent(999_999)).toBeNull();
   });
 
-  it("reads a score box from ReputationRegistry 768559198", async () => {
+  it("reads a score box from ReputationRegistry 768570171", async () => {
     const [agent] = await registry.listAgents(1);
     const score = await registry.getScore(agent!.agentId);
     if (score === null) {
@@ -78,7 +78,7 @@ describeLive("live TestNet registries", () => {
     if (score.jobsPaid > 0) expect(score.firstAt).toBeGreaterThan(1_600_000_000);
   });
 
-  it("reads jobs from ValidationRegistry 768547172 with valid spec hashes", async () => {
+  it("reads jobs from ValidationRegistry 768570174 with valid spec hashes", async () => {
     const jobs = await registry.listJobs({ limit: 10 });
     expect(await registry.totalJobs()).toBeGreaterThanOrEqual(jobs.length);
     for (const job of jobs) {
@@ -91,11 +91,21 @@ describeLive("live TestNet registries", () => {
     }
   });
 
-  it("lists the payment ids reputation has already credited", async () => {
-    const counted = await registry.countedPaymentIds();
-    for (const id of counted) {
-      expect(id).toMatch(/^[0-9a-f]{64}$/);
-    }
+  it("reads a score whose numbers match a payment that really happened", async () => {
+    // The old test here listed `pd_` boxes, which no longer exist — so it
+    // asserted a shape over an always-empty array and could not fail.
+    //
+    // This asks the question the registry now answers: agent 1's score was
+    // credited by deploy-v2.mjs's one legitimate client-to-server payment, so
+    // jobs_paid and volume_micro must reflect exactly that transfer.
+    const score = await registry.getScore(1);
+    expect(score, "agent 1 has no score box; the deployment proof did not run").not.toBeNull();
+    expect(score!.jobsPaid).toBeGreaterThan(0);
+    expect(score!.volumeMicro).toBeGreaterThan(0);
+    // Every credit needs a transfer, so volume can never be zero while
+    // jobs_paid is not: accept_feedback asserts asset_amount > 0.
+    expect(score!.volumeMicro / score!.jobsPaid).toBeGreaterThan(0);
+    expect(score!.firstAt).toBeLessThanOrEqual(score!.lastAt);
   });
 
   it("composes a post_job transaction that decodes back to the intended call", async () => {
