@@ -10,9 +10,9 @@ export type Network = "testnet" | "mainnet";
 /** The three Ripar registries. TestNet is the only network they exist on today. */
 export declare const REGISTRY_APP_IDS: {
     readonly testnet: {
-        readonly identity: 768572968;
-        readonly reputation: 768572969;
-        readonly validation: 768572979;
+        readonly identity: 768633998;
+        readonly reputation: 768633999;
+        readonly validation: 768634000;
     };
 };
 export type RegistryName = keyof (typeof REGISTRY_APP_IDS)["testnet"];
@@ -74,12 +74,11 @@ export declare const BOX_PREFIX: {
      * bid on one job shares a byte prefix and algod can filter the listing
      * server-side.
      *
-     * NOT DEPLOYED on 768572979. place_bid/accept_bid/withdraw_bid exist in
-     * `ripar-contracts/contracts/validation_registry.py` and compile, but the
-     * live ValidationRegistry predates them, so this prefix currently matches
-     * zero boxes on chain. That is a real, checkable answer — an empty bid list
-     * on a live registry — and `src/deployed.ts` is what stops a WRITE against
-     * the same missing methods being composed at all.
+     * Live on 768634000 since 2026-08-05. Against an OLDER ValidationRegistry —
+     * and eight earlier generations are still on chain, still answering — this
+     * prefix matches zero boxes, which is a real, checkable answer rather than an
+     * error. `src/deployed.ts` is what stops a WRITE against those same missing
+     * methods being composed at all.
      */
     readonly bid: "bd_";
 };

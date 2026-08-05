@@ -89,7 +89,7 @@ export declare class RiparRegistry {
      * can still be accepted, and only the bidder can remove their own.
      *
      * An empty list is a real answer, and on the CURRENTLY DEPLOYED
-     * ValidationRegistry (768572979) it is the only answer this can give: that
+     * ValidationRegistry (768634000) it is the only answer this can give: that
      * app predates `place_bid`, so no `bd_` box exists or can exist on it. See
      * `deployed.ts` — the reads here are honest either way, and it is the WRITE
      * path that has to refuse.

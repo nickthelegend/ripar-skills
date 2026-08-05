@@ -36,7 +36,7 @@ export const TOOLS = [
     {
         name: "ripar_search_agents",
         title: "Search Ripar agents",
-        description: "List or search agents in the on-chain IdentityRegistry (Algorand TestNet app 768572968). " +
+        description: "List or search agents in the on-chain IdentityRegistry (Algorand TestNet app 768633998). " +
             "Matches a substring of the agent's domain, or an exact agent id or Algorand address. " +
             "Returns live registry records — if the chain is unreachable this fails rather than guessing.",
         inputShape: {
@@ -106,7 +106,7 @@ export const TOOLS = [
     {
         name: "ripar_get_reputation",
         title: "Get an agent's reputation",
-        description: "Read an agent's score from the ReputationRegistry (Algorand TestNet app 768572969): payments " +
+        description: "Read an agent's score from the ReputationRegistry (Algorand TestNet app 768633999): payments " +
             "credited to it, total USDC volume, and validator verdicts. Each credit is keyed to a payment " +
             "transaction id and the contract refuses to count the same id twice, but it does NOT verify " +
             "that the id names a real transfer — so treat a score as a claim recorded on chain, not one " +
@@ -124,7 +124,7 @@ export const TOOLS = [
     {
         name: "ripar_list_jobs",
         title: "List validated jobs, with what is actually escrowed",
-        description: "List jobs on the ValidationRegistry (Algorand TestNet app 768572979), newest first, " +
+        description: "List jobs on the ValidationRegistry (Algorand TestNet app 768634000), newest first, " +
             "optionally filtered by status or by the agent serving or validating them. Each job commits " +
             "to its spec by hash; the spec and the result themselves stay offchain. " +
             "Every job reports BOTH numbers, and they mean different things: the BUDGET is what the " +
@@ -399,9 +399,9 @@ export const TOOLS = [
             "a board that erases what it turned down cannot be checked afterwards — 'we took the " +
             "cheapest' should be verifiable against the ones that lost. So a bid appearing here does not " +
             "mean it is still live: check the job's status. Only bids on an OPEN job can be accepted. " +
-            "Bidding is NOT DEPLOYED on the live ValidationRegistry (768572979), which predates place_bid, " +
-            "so on that registry this returns an empty list and says why. That is a real read of a real " +
-            "chain, not a stub.",
+            "Bidding IS deployed on the live ValidationRegistry (768634000). Against an older registry " +
+            "that predates place_bid this returns an empty list and says why, rather than letting " +
+            "'no bids' read as 'nobody bid'. Either way it is a real read of a real chain, not a stub.",
         inputShape: {
             jobId: z.number().int().positive().describe("The job whose bids you want"),
             limit: z.number().int().min(1).max(100).default(50).describe("Maximum bids to return"),
@@ -502,10 +502,10 @@ export const TOOLS = [
             "Only the bidding agent's own address may bid, only while the job is OPEN, and a second bid " +
             "from the same agent REPLACES the first — all three are checked against the chain here so an " +
             "impossible bid fails for free instead of for a fee. " +
-            "place_bid is NOT DEPLOYED on the live registry: it exists in ripar-contracts and compiles, " +
-            "but 768572979 predates it. This tool reads that app's approval program before composing " +
-            "anything and refuses with an explanation rather than handing back a transaction the router " +
-            "will reject. Nothing is submitted and no key is used or held.",
+            "place_bid IS deployed on the live registry (768634000). This tool still reads that app's " +
+            "approval program before composing anything, so a config pointed at an older generation gets " +
+            "an explanation instead of a transaction its router cannot dispatch. Nothing is submitted " +
+            "and no key is used or held.",
         inputShape: {
             sender: z
                 .string()
@@ -558,9 +558,9 @@ export const TOOLS = [
             "It also assigns the job in the same call: there is no separate assign step and no window " +
             "where the job is assigned at the old price. Losing bids are not swept and stay readable. " +
             "Client-only and open-jobs-only, both checked against the chain first. " +
-            "accept_bid is NOT DEPLOYED on the live registry — this reads 768572979's approval program " +
-            "and refuses clearly rather than composing a call its router cannot dispatch. Nothing is " +
-            "submitted and no key is used or held.",
+            "accept_bid IS deployed on the live registry (768634000). This still reads that app's " +
+            "approval program first, so an older registry gets a clear refusal rather than a call its " +
+            "router cannot dispatch. Nothing is submitted and no key is used or held.",
         inputShape: {
             sender: z.string().length(58).describe("The job's client — the only address that may accept"),
             jobId: z.number().int().positive().describe("The job whose bid you are accepting"),
@@ -599,9 +599,9 @@ export const TOOLS = [
             "The id, the domain and the reputation are preserved and follow the identity. " +
             "Only the CURRENT address may sign, so this is a race: it rescues a key you fear is exposed " +
             "and is useless against one already in use against you — whoever holds it can rotate first. " +
-            "rotate_address is NOT DEPLOYED on the live IdentityRegistry (768572968). This reads that " +
-            "app's approval program before composing and refuses with what the deployed contract does " +
-            "offer instead. Nothing is submitted and no key is used or held.",
+            "rotate_address IS deployed on the live IdentityRegistry (768633998). This still reads that " +
+            "app's approval program before composing, so an older registry gets a refusal naming what it " +
+            "does offer instead. Nothing is submitted and no key is used or held.",
         inputShape: {
             sender: z
                 .string()

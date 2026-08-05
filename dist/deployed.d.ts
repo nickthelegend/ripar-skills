@@ -1,19 +1,25 @@
 /**
  * "Is this method actually on the app I am about to call?"
  *
- * The contracts in `ripar-contracts/contracts/*.py` are AHEAD of the chain.
- * Bidding, key rotation, milestone release, job expiry and a protocol fee were
- * all written, they compile, and they are NOT deployed — the deployer ran out
- * of TestNet ALGO. The live registries are the previous generation:
+ * The contracts in `ripar-contracts/contracts/*.py` were AHEAD of the chain for
+ * most of this project's life. Bidding, key rotation, milestone release, job
+ * expiry and a protocol fee all compiled while no deployed registry routed
+ * them, because the deployer had run out of TestNet ALGO. As of 2026-08-05 the
+ * live registries route all 36 compiled methods:
  *
- *     IdentityRegistry   768572968
- *     ReputationRegistry 768572969
- *     ValidationRegistry 768572979
+ *     IdentityRegistry   768633998
+ *     ReputationRegistry 768633999
+ *     ValidationRegistry 768634000
  *
- * So a tool composing `place_bid` against 768572979 produces a perfectly valid
- * transaction that the router will reject, and the caller pays a fee to be told
- * `assert failed pc=NNN`. That error names neither the method nor the reason.
- * This module turns it into a sentence.
+ * This module stays, and stays load bearing, for two reasons. A config pointed
+ * at an older generation is still a config that exists — nine of them were
+ * deployed and all but the last three are still on chain, answering. And the
+ * next feature written will be ahead of the chain again.
+ *
+ * Without it, a tool composing `place_bid` against a registry that predates it
+ * produces a perfectly valid transaction the router rejects, and the caller
+ * pays a fee to be told `assert failed pc=NNN`. That error names neither the
+ * method nor the reason. This module turns it into a sentence.
  *
  * ## How the check works, and what it can and cannot prove
  *
@@ -50,8 +56,12 @@ import type { RiparConfig } from "./config.js";
  *
  * Transcribed from `ripar-contracts/contracts/artifacts/IdentityRegistry.arc56.json`
  * and `ValidationRegistry.arc56.json`. `deployed` records where each one stood
- * on 2026-08-04 and is DOCUMENTATION ONLY — every runtime decision below reads
- * the chain. A stale note here can mislead a reader; it cannot mislead a call.
+ * on 2026-08-05 — registries 768633998 / 768633999 / 768634000, where all 36
+ * compiled methods are dispatchable — and is DOCUMENTATION ONLY. Every runtime
+ * decision below reads the chain, so a stale note here can mislead a reader; it
+ * cannot mislead a call. The bidding methods and rotate_address read `false`
+ * until this deployment, and the tools that compose them refused at runtime by
+ * reading the live approval program rather than trusting this table.
  */
 export declare const CONTRACT_METHODS: {
     readonly post_job: {
@@ -74,25 +84,40 @@ export declare const CONTRACT_METHODS: {
         readonly registry: "validation";
         readonly deployed: true;
     };
+    readonly release_partial: {
+        readonly signature: "release_partial(uint64,uint64)uint64";
+        readonly registry: "validation";
+        readonly deployed: true;
+    };
+    readonly expire_job: {
+        readonly signature: "expire_job(uint64)bool";
+        readonly registry: "validation";
+        readonly deployed: true;
+    };
     readonly place_bid: {
         readonly signature: "place_bid(uint64,uint64,uint64,byte[])bool";
         readonly registry: "validation";
-        readonly deployed: false;
+        readonly deployed: true;
     };
     readonly withdraw_bid: {
         readonly signature: "withdraw_bid(uint64,uint64)bool";
         readonly registry: "validation";
-        readonly deployed: false;
+        readonly deployed: true;
     };
     readonly accept_bid: {
         readonly signature: "accept_bid(uint64,uint64)bool";
         readonly registry: "validation";
-        readonly deployed: false;
+        readonly deployed: true;
+    };
+    readonly get_bid: {
+        readonly signature: "get_bid(uint64,uint64)(uint64,uint64,uint64,byte[],uint64)";
+        readonly registry: "validation";
+        readonly deployed: true;
     };
     readonly rotate_address: {
         readonly signature: "rotate_address(uint64,address)bool";
         readonly registry: "identity";
-        readonly deployed: false;
+        readonly deployed: true;
     };
     readonly agent_address: {
         readonly signature: "agent_address(uint64)address";

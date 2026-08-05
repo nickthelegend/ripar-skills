@@ -28,6 +28,7 @@ import {
 } from "../src/unsigned.js";
 import { MethodNotDeployedError, deploymentReport, isMethodDeployed } from "../src/deployed.js";
 import { agentHealth } from "../src/health.js";
+import { TOOL_NAMES } from "../src/mcp/tools.js";
 import algosdk from "algosdk";
 
 const skip = process.env.RIPAR_SKIP_LIVE === "1";
@@ -299,10 +300,56 @@ describeLive("live TestNet registries", () => {
     ).toBe(false);
   });
 
-  it("reads an empty bid list off the live registry, because bd_ boxes cannot exist on it", async () => {
-    const jobs = await registry.listJobs({ limit: 1 });
-    if (!jobs.length) return;
-    expect(await registry.listBids(jobs[0]!.jobId)).toEqual([]);
+  it("decodes real bd_ boxes off the live registry", async () => {
+    // This asserted an EMPTY list until 2026-08-05, on the grounds that no
+    // deployed registry routed place_bid so no bd_ box could exist. That made
+    // it a test of the deployment rather than of the decoder — it would have
+    // passed against a listBids that returned [] unconditionally.
+    //
+    // Bids are real now, so the decoder gets exercised. Which jobs carry bids
+    // depends on what has been run against the chain, so this scans rather
+    // than assuming, and asserts the SHAPE of whatever it finds.
+    const jobs = await registry.listJobs({ limit: 25 });
+    expect(jobs.length).toBeGreaterThanOrEqual(1);
+
+    let seen = 0;
+    for (const job of jobs) {
+      for (const bid of await registry.listBids(job.jobId)) {
+        seen++;
+        expect(bid.jobId).toBe(job.jobId);
+        expect(bid.bidderAgentId).toBeGreaterThan(0);
+        // A zero-price bid is refused by the contract, so one here means the
+        // price field is being read at the wrong offset.
+        expect(bid.priceMicro).toBeGreaterThan(0);
+        // The pitch is committed as a 32-byte sha256, never stored as text.
+        expect(bid.pitchHash).toHaveLength(64);
+        expect(bid.placedAt).toBeGreaterThan(1_600_000_000);
+      }
+    }
+    expect(seen, "no bd_ box found on any of the 25 most recent jobs").toBeGreaterThan(0);
+  });
+
+  it("the live agent card advertises exactly the tools this server registers", async () => {
+    // The card's MCP extension is how a peer learns what it will find BEFORE
+    // connecting. It is hand-written in another repository, so it drifts: it
+    // listed ten tools while this server registered fifteen, and every peer
+    // that trusted it simply never asked for the other five.
+    //
+    // Nothing else catches this. Both sides are internally consistent and the
+    // card validates fine — the two are just describing different servers.
+    const res = await fetch("https://api.ripar.io/.well-known/agent.json", {
+      headers: { accept: "application/json" },
+    });
+    expect(res.ok, `the card answered ${res.status}`).toBe(true);
+    const card = (await res.json()) as {
+      capabilities?: { extensions?: { uri: string; params?: { tools?: string[] } }[] };
+    };
+    const mcp = (card.capabilities?.extensions ?? []).find((e) => e.uri.includes("/mcp/"));
+    expect(mcp, "the card carries no MCP extension").toBeTruthy();
+
+    const advertised = [...(mcp!.params?.tools ?? [])].sort();
+    const registered = [...TOOL_NAMES].sort();
+    expect(advertised).toEqual(registered);
   });
 
   it("checks a real registered agent over real HTTP", async () => {
