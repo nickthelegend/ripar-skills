@@ -2,9 +2,12 @@
  * Bidding, key rotation, and the guard that stands between them and a
  * transaction the chain would reject.
  *
- * The contracts in ripar-contracts are AHEAD of what is deployed: `place_bid`,
- * `accept_bid` and `rotate_address` all compile and none of them is on the live
- * registries. So this file has two jobs, and the second is the important one:
+ * `place_bid`, `accept_bid` and `rotate_address` were AHEAD of the chain for
+ * most of this project's life: they compiled, and no deployed registry routed
+ * them. Registries 768633998 / 768633999 / 768634000, deployed 2026-08-05,
+ * route all 36 compiled methods, so that gap is closed.
+ *
+ * The file still has two jobs, and the second is still the important one:
  *
  *   1. When the method IS routed, the composed transaction has to be right —
  *      right selector, right args, right boxes, right foreign apps.
@@ -12,11 +15,16 @@
  *      method and says what to do instead. Not compose-and-hope, not a generic
  *      failure, and above all not a mock that returns a plausible transaction.
  *
+ * The second half used to be free, because the live registries really were
+ * missing those methods. It now has to be provoked with PRE_BIDDING_VALIDATION
+ * and PRE_ROTATION_IDENTITY below — a guard nothing ever forces to say no is a
+ * guard nobody has tested, and anyone pointing an old config at a current tool
+ * still lands on that path.
+ *
  * The stub algod below serves an approval program built from a chosen set of
  * selectors, which is how both halves get tested against the same code path
  * that runs in production. `test/live.test.ts` runs the same check against the
- * REAL 768572968/768572979 programs, so if a registry with bidding is ever
- * deployed, that file is what notices.
+ * REAL programs, so a config pointed at an older generation is noticed there.
  */
 
 import { describe, expect, it, beforeEach } from "vitest";
@@ -133,15 +141,50 @@ function programWith(signatures: string[]): string {
   return b64(new Uint8Array(parts));
 }
 
-/** Every method the LIVE registries really route today, per the deployed ABI. */
+/** Every method the LIVE registries really route today, per the deployed ABI.
+ *
+ *  Registries 768633998 / 768633999 / 768634000, deployed 2026-08-05, route all
+ *  36 compiled methods. The bidding set and rotate_address were absent from
+ *  every earlier generation, which is why the guard exists at all — keep this
+ *  list matching the chain, because `deploymentReport` is asserted against it. */
 const DEPLOYED_VALIDATION = [
   "post_job(byte[],uint64,uint64)uint64",
   "assign_job(uint64,uint64)bool",
   "fund_job(axfer,uint64)uint64",
   "release_escrow(uint64)uint64",
   "refund_escrow(uint64)uint64",
+  "release_partial(uint64,uint64)uint64",
+  "expire_job(uint64)bool",
+  "place_bid(uint64,uint64,uint64,byte[])bool",
+  "withdraw_bid(uint64,uint64)bool",
+  "accept_bid(uint64,uint64)bool",
+  "get_bid(uint64,uint64)(uint64,uint64,uint64,byte[],uint64)",
 ];
 const DEPLOYED_IDENTITY = [
+  "new_agent(string)uint64",
+  "agent_address(uint64)address",
+  "deregister_agent(uint64)bool",
+  "rotate_address(uint64,address)bool",
+];
+
+/**
+ * A registry generation from BEFORE 2026-08-05: escrow, but no bidding and no
+ * rotation.
+ *
+ * The refusal path is the reason this guard exists, and it used to be exercised
+ * for free because the live registries really were missing those methods. Now
+ * that they route all 36, refusing can only be provoked deliberately — and a
+ * guard nothing ever forces to say no is a guard nobody has tested. Anyone
+ * pointing an old config at a current tool still lands here.
+ */
+const PRE_BIDDING_VALIDATION = [
+  "post_job(byte[],uint64,uint64)uint64",
+  "assign_job(uint64,uint64)bool",
+  "fund_job(axfer,uint64)uint64",
+  "release_escrow(uint64)uint64",
+  "refund_escrow(uint64)uint64",
+];
+const PRE_ROTATION_IDENTITY = [
   "new_agent(string)uint64",
   "agent_address(uint64)address",
   "deregister_agent(uint64)bool",
@@ -412,7 +455,7 @@ describe("the deployed-method guard", () => {
   });
 
   it("does not find one it does not", async () => {
-    const { config } = chain({});
+    const { config } = chain({ validationMethods: PRE_BIDDING_VALIDATION });
     expect(
       await isMethodDeployed(config, APPS.validation, CONTRACT_METHODS.place_bid.signature)
     ).toBe(false);
@@ -439,11 +482,25 @@ describe("the deployed-method guard", () => {
     const report = await deploymentReport(config);
     const byName = Object.fromEntries(report.methods.map((m) => [m.name, m]));
     expect(byName.fund_job!.onChain).toBe(true);
-    expect(byName.place_bid!.onChain).toBe(false);
-    expect(byName.rotate_address!.onChain).toBe(false);
+    expect(byName.place_bid!.onChain).toBe(true);
+    expect(byName.rotate_address!.onChain).toBe(true);
     // `deployed` in the table is documentation; `onChain` is the read. They
     // agree here, and if they ever stop the table is what is wrong.
     for (const m of report.methods) expect(m.onChain).toBe(m.expectedOnChain);
+  });
+
+  it("still reports a gap when the chain is behind the table", async () => {
+    // The whole point of the report is naming what the source tree expects and
+    // the chain does not have. Now that the live registries route everything,
+    // that gap has to be provoked deliberately or this stops testing anything.
+    const { config } = chain({ validationMethods: ["fund_job(axfer,uint64)uint64"] });
+    const report = await deploymentReport(config);
+    const byName = Object.fromEntries(report.methods.map((m) => [m.name, m]));
+    expect(byName.fund_job!.onChain).toBe(true);
+    expect(byName.place_bid!.onChain).toBe(false);
+    expect(byName.place_bid!.expectedOnChain).toBe(true);
+    const drifted = report.methods.filter((m) => m.onChain !== m.expectedOnChain);
+    expect(drifted.length).toBeGreaterThan(0);
   });
 
   it("refuses to guess when the app cannot be read at all", async () => {
@@ -461,8 +518,8 @@ describe("the deployed-method guard", () => {
 describe("composePlaceBid", () => {
   const live = { validationMethods: [...DEPLOYED_VALIDATION, CONTRACT_METHODS.place_bid.signature] };
 
-  it("REFUSES against the registry that is actually deployed, and says what to do instead", async () => {
-    const { config } = chain({ jobs: [OPEN_JOB], agents: AGENTS });
+  it("REFUSES against a pre-bidding registry, and says what to do instead", async () => {
+    const { config } = chain({ jobs: [OPEN_JOB], agents: AGENTS, validationMethods: PRE_BIDDING_VALIDATION });
     const err = await composePlaceBid(config, {
       sender: BIDDER,
       jobId: 7,
@@ -472,7 +529,7 @@ describe("composePlaceBid", () => {
     }).catch((e) => e);
 
     expect(err).toBeInstanceOf(MethodNotDeployedError);
-    expect(err.message).toMatch(/place_bid.*is not deployed on app 768572979/);
+    expect(err.message).toMatch(/place_bid.*is not deployed on app 768634000/);
     expect(err.message).toMatch(/assign_job/);
     // The selector is in the message so the claim can be checked by hand
     // against the program on an explorer.
@@ -480,7 +537,7 @@ describe("composePlaceBid", () => {
   });
 
   it("refuses BEFORE reading the job, so a refusal costs one request", async () => {
-    const { config, requests } = chain({ jobs: [OPEN_JOB], agents: AGENTS });
+    const { config, requests } = chain({ jobs: [OPEN_JOB], agents: AGENTS, validationMethods: PRE_BIDDING_VALIDATION });
     await composePlaceBid(config, {
       sender: BIDDER,
       jobId: 7,
@@ -661,13 +718,13 @@ describe("composeAcceptBid", () => {
     validationMethods: [...DEPLOYED_VALIDATION, CONTRACT_METHODS.accept_bid.signature],
   };
 
-  it("REFUSES against the deployed registry", async () => {
-    const { config } = chain({ jobs: [OPEN_JOB], agents: AGENTS });
+  it("REFUSES against a pre-bidding registry", async () => {
+    const { config } = chain({ jobs: [OPEN_JOB], agents: AGENTS, validationMethods: PRE_BIDDING_VALIDATION });
     const err = await composeAcceptBid(config, { sender: CLIENT, jobId: 7, bidderAgentId: 1 }).catch(
       (e) => e
     );
     expect(err).toBeInstanceOf(MethodNotDeployedError);
-    expect(err.message).toMatch(/accept_bid\(uint64,uint64\)bool is not deployed on app 768572979/);
+    expect(err.message).toMatch(/accept_bid\(uint64,uint64\)bool is not deployed on app 768634000/);
     expect(err.message).toMatch(/assign_job/);
   });
 
@@ -771,8 +828,8 @@ describe("the ripar_list_bids tool", () => {
   const run = (config: RiparConfig, registry: RiparRegistry, args: Record<string, unknown>) =>
     getTool("ripar_list_bids")!.run(args, { registry, config }) as Promise<Record<string, any>>;
 
-  it("says bidding is NOT deployed when the live program does not route place_bid", async () => {
-    const { config, registry } = chain({ jobs: [OPEN_JOB] });
+  it("says bidding is NOT deployed when the program does not route place_bid", async () => {
+    const { config, registry } = chain({ jobs: [OPEN_JOB], validationMethods: PRE_BIDDING_VALIDATION });
     const out = await run(config, registry, { jobId: 7 });
 
     expect(out.biddingDeployed).toBe(false);
@@ -780,7 +837,7 @@ describe("the ripar_list_bids tool", () => {
     // An empty list with no explanation reads as "nobody bid". It has to say
     // that no bid COULD exist here, or a reader draws the wrong conclusion
     // about the job rather than about the registry.
-    expect(out.notes.join(" ")).toMatch(/place_bid is NOT in app 768572979's approval program/);
+    expect(out.notes.join(" ")).toMatch(/place_bid is NOT in app 768634000's approval program/);
     expect(out.notes.join(" ")).toMatch(/naming an agent directly/);
   });
 
@@ -837,8 +894,8 @@ describe("composeRotateAddress", () => {
     identityMethods: [...DEPLOYED_IDENTITY, CONTRACT_METHODS.rotate_address.signature],
   };
 
-  it("REFUSES against the deployed IdentityRegistry, and does not call deregistering equivalent", async () => {
-    const { config } = chain({ agents: AGENTS });
+  it("REFUSES against a pre-rotation IdentityRegistry, and does not call deregistering equivalent", async () => {
+    const { config } = chain({ agents: AGENTS, identityMethods: PRE_ROTATION_IDENTITY });
     const err = await composeRotateAddress(config, {
       sender: BIDDER,
       agentId: 1,
@@ -846,7 +903,7 @@ describe("composeRotateAddress", () => {
     }).catch((e) => e);
 
     expect(err).toBeInstanceOf(MethodNotDeployedError);
-    expect(err.message).toMatch(/rotate_address\(uint64,address\)bool is not deployed on app 768572968/);
+    expect(err.message).toMatch(/rotate_address\(uint64,address\)bool is not deployed on app 768633998/);
     expect(err.message).toMatch(/NO KEY RECOVERY ON CHAIN TODAY/);
     // The fallback is offered AND its cost is stated. An alternative presented
     // without its cost is advice to lose the identity.

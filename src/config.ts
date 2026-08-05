@@ -12,7 +12,7 @@ export type Network = "testnet" | "mainnet";
 /** The three Ripar registries. TestNet is the only network they exist on today. */
 export const REGISTRY_APP_IDS = {
   testnet: {
-    identity: 768572968,
+    identity: 768633998,
     // v4. v1 (768547170) took the payment id and amount as ARGUMENTS and only
     // checked the id was 32 bytes and unseen, so a score could be minted from
     // bytes — two of the scores it published resolve to no transaction at all.
@@ -24,8 +24,8 @@ export const REGISTRY_APP_IDS = {
     // record_validation, called by the ValidationRegistry and by nothing else,
     // so a verdict finally reaches the score — before it, `validated` and
     // `disputed` were permanently 0 while jobs plainly read VALIDATED.
-    reputation: 768572969,
-    validation: 768572979,
+    reputation: 768633999,
+    validation: 768634000,
   },
 } as const satisfies Record<"testnet", Record<string, number>>;
 
@@ -99,12 +99,11 @@ export const BOX_PREFIX = {
    * bid on one job shares a byte prefix and algod can filter the listing
    * server-side.
    *
-   * NOT DEPLOYED on 768572979. place_bid/accept_bid/withdraw_bid exist in
-   * `ripar-contracts/contracts/validation_registry.py` and compile, but the
-   * live ValidationRegistry predates them, so this prefix currently matches
-   * zero boxes on chain. That is a real, checkable answer — an empty bid list
-   * on a live registry — and `src/deployed.ts` is what stops a WRITE against
-   * the same missing methods being composed at all.
+   * Live on 768634000 since 2026-08-05. Against an OLDER ValidationRegistry —
+   * and eight earlier generations are still on chain, still answering — this
+   * prefix matches zero boxes, which is a real, checkable answer rather than an
+   * error. `src/deployed.ts` is what stops a WRITE against those same missing
+   * methods being composed at all.
    */
   bid: "bd_",
 } as const;

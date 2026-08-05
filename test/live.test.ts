@@ -37,7 +37,7 @@ const registry = new RiparRegistry();
 const APPS = REGISTRY_APP_IDS.testnet;
 
 describeLive("live TestNet registries", () => {
-  it("reads agent_count out of IdentityRegistry 768572968", async () => {
+  it("reads agent_count out of IdentityRegistry 768633998", async () => {
     const total = await registry.totalAgents();
     expect(typeof total).toBe("number");
     // The registry has been exercised, so at least one agent exists.
@@ -73,7 +73,7 @@ describeLive("live TestNet registries", () => {
     expect(await registry.getAgent(999_999)).toBeNull();
   });
 
-  it("reads a score box from ReputationRegistry 768572969", async () => {
+  it("reads a score box from ReputationRegistry 768633999", async () => {
     const [agent] = await registry.listAgents(1);
     const score = await registry.getScore(agent!.agentId);
     if (score === null) {
@@ -87,7 +87,7 @@ describeLive("live TestNet registries", () => {
     if (score.jobsPaid > 0) expect(score.firstAt).toBeGreaterThan(1_600_000_000);
   });
 
-  it("reads jobs from ValidationRegistry 768572979 with valid spec hashes", async () => {
+  it("reads jobs from ValidationRegistry 768634000 with valid spec hashes", async () => {
     const jobs = await registry.listJobs({ limit: 10 });
     expect(await registry.totalJobs()).toBeGreaterThanOrEqual(jobs.length);
     for (const job of jobs) {
@@ -269,26 +269,34 @@ describeLive("live TestNet registries", () => {
     }
   });
 
-  it("confirms bidding and rotation are STILL not on chain, and refuses accordingly", async () => {
+  it("confirms bidding and rotation ARE on chain, and composes against them", async () => {
     const report = await deploymentReport(registry.config);
     const byName = Object.fromEntries(report.methods.map((m) => [m.name, m]));
 
-    // If any of these flip to true, a newer generation was deployed: update
-    // CONTRACT_METHODS[].deployed, and re-read every tool description that says
-    // NOT DEPLOYED, because they will have stopped being true.
-    expect(byName.place_bid!.onChain, "place_bid").toBe(false);
-    expect(byName.accept_bid!.onChain, "accept_bid").toBe(false);
-    expect(byName.rotate_address!.onChain, "rotate_address").toBe(false);
+    // These read false until registries 768633998 / 768633999 / 768634000 were
+    // deployed on 2026-08-05. If any flips BACK to false, the config is pointing
+    // at an older generation — which is a misconfiguration, not a code change.
+    expect(byName.place_bid!.onChain, "place_bid").toBe(true);
+    expect(byName.accept_bid!.onChain, "accept_bid").toBe(true);
+    expect(byName.rotate_address!.onChain, "rotate_address").toBe(true);
 
-    // ...and the composer refuses rather than handing back a doomed transaction.
+    // ...and the composer now hands back a real transaction instead of refusing.
     const agent = (await registry.listAgents(1))[0]!;
-    await expect(
-      composeRotateAddress(registry.config, {
-        sender: agent.address,
-        agentId: agent.agentId,
-        newAddress: "7777777777777777777777777777777777777777777777777774MSJUVU",
-      })
-    ).rejects.toBeInstanceOf(MethodNotDeployedError);
+    const composed = await composeRotateAddress(registry.config, {
+      sender: agent.address,
+      agentId: agent.agentId,
+      newAddress: "7777777777777777777777777777777777777777777777777774MSJUVU",
+    });
+    expect(composed).toBeTruthy();
+  });
+
+  it("still refuses a method that genuinely is not on chain", async () => {
+    // The guard has to keep working now that everything it used to refuse is
+    // deployed. A guard that only ever says yes proves nothing, so this asks
+    // about a signature that has never existed.
+    expect(
+      await isMethodDeployed(registry.config, APPS.identity, "teleport_agent(uint64)bool")
+    ).toBe(false);
   });
 
   it("reads an empty bid list off the live registry, because bd_ boxes cannot exist on it", async () => {
