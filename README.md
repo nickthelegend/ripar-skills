@@ -142,9 +142,9 @@ claude mcp add ripar -- node /absolute/path/to/ripar-skills/dist/bin/mcp-stdio.j
   "signed": false,
   "groupId": "<base64 of the 32-byte group id BOTH transactions carry>",
   "method": "fund_job(axfer,uint64)uint64",
-  "summary": "Move 1.000000 of asset 768547363 into escrow for job 3 … the money leaves KBDR… and is held by the contract at EJHY… until the work passes (release_escrow pays the assignee) or fails (refund_escrow returns it here).",
+  "summary": "Move 1.000000 of asset 10458941 into escrow for job 3 … the money leaves KBDR… and is held by the contract at EJHY… until the work passes (release_escrow pays the assignee) or fails (refund_escrow returns it here).",
   "transactions": [
-    { "index": 0, "kind": "axfer", "summary": "Transfer 1.000000 of asset 768547363 from KBDR… to the app account EJHY…" },
+    { "index": 0, "kind": "axfer", "summary": "Transfer 1.000000 of asset 10458941 from KBDR… to the app account EJHY…" },
     { "index": 1, "kind": "appl",  "boxes": ["jb_3", "es_3"], "summary": "Call fund_job(axfer,uint64) … which reads the amount off transaction 0" }
   ],
   "nextSteps": ["Sign BOTH transactions … a group is invalid if any member is missing or moved.", "…"]
@@ -441,11 +441,12 @@ src/
 Things that are true about the deployed system today, written down because finding them in
 production is worse.
 
-**1. Escrow is denominated in a test asset, not in USDC.** The live ValidationRegistry was
-bootstrapped against ASA 768547363, a TestNet token, and `escrowTerms()` reports that id rather than
-assuming it. `USDC_ASSET_ID` (10458941 on TestNet) is what the x402 side quotes prices in, and the
-two are different assets. Read the `assetId` a composer gives you; do not assume "USDC" because the
-amounts are formatted with six decimals.
+**1. Escrow and x402 pricing are the same asset — now.** The live ValidationRegistry is
+bootstrapped against ASA 10458941, circulating TestNet USDC, which is also what the x402 side quotes
+prices in. An earlier generation was bootstrapped to a token minted for this deployment, so escrow
+and pricing were near-homonyms denominated in different things. Still read the `assetId` a composer
+gives you rather than assuming: `escrowTerms()` reports what the registry was actually bootstrapped
+with, and `bootstrap` is one-shot, so an older registry still answers with the old asset forever.
 
 **2. The volume on TestNet is a proof, not traction.** Agent 1's score box currently reports one
 credited payment of 0.010000 and two passing validations. Those are real — the payment is an

@@ -26,7 +26,7 @@ import { escrowBoxName, jobBoxName, uint64Bytes } from "../src/abi.js";
 
 const APPS = REGISTRY_APP_IDS.testnet;
 const CLIENT_ADDR = "KBDRZK3BV2YFJJAVV3S5XQYDWU4RDDI6EDXXKMG3O4AEVPEDCETDKEISKQ";
-const ESCROW_ASSET = 768_547_363;
+const ESCROW_ASSET = 10_458_941;
 
 const b64 = (u: Uint8Array) => Buffer.from(u).toString("base64");
 const agentBox = (id: number, domain: string) =>

@@ -311,7 +311,7 @@ describe("the MCP server over an in-memory transport", () => {
               params: {
                 "global-state": [
                   g("job_count", 1),
-                  g("escrow_asset", 768_547_363),
+                  g("escrow_asset", 10_458_941),
                   g("dispute_window", 20),
                   g("identity_app", 768_633_998),
                   g("reputation_app", 768_633_999),
@@ -353,7 +353,7 @@ describe("the MCP server over an in-memory transport", () => {
     expect(list.jobs[0].escrowUsdc).toBe("0.000000");
     expect(list.jobs[0].funded).toBe(false);
     expect(list.escrow.fundedJobs).toBe(0);
-    expect(list.escrow.assetId).toBe(768_547_363);
+    expect(list.escrow.assetId).toBe(10_458_941);
     // The distinction is stated, not just numbered — this string is what a
     // model reads before it decides the budget means it will be paid.
     expect(list.escrow.note).toMatch(/budget is what the client says/i);
