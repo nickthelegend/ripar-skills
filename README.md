@@ -441,12 +441,12 @@ src/
 Things that are true about the deployed system today, written down because finding them in
 production is worse.
 
-**1. Escrow and x402 pricing are the same asset — now.** The live ValidationRegistry is
-bootstrapped against ASA 10458941, circulating TestNet USDC, which is also what the x402 side quotes
-prices in. An earlier generation was bootstrapped to a token minted for this deployment, so escrow
-and pricing were near-homonyms denominated in different things. Still read the `assetId` a composer
-gives you rather than assuming: `escrowTerms()` reports what the registry was actually bootstrapped
-with, and `bootstrap` is one-shot, so an older registry still answers with the old asset forever.
+**1. Escrow is denominated in a test asset, not in circulating USDC.** The live
+ValidationRegistry is bootstrapped against ASA 768547363 (`rUSDC`), a six-decimal token minted for
+this deployment because the TestNet USDC faucet is login-gated. `escrowTerms()` reports that id
+rather than assuming it. Read the `assetId` a composer gives you; do not assume "USDC" because the
+amounts are formatted with six decimals. Moving to circulating USDC (10458941) means a redeploy —
+`bootstrap` is one-shot — and an older registry still answers with the old asset forever.
 
 **2. The volume on TestNet is a proof, not traction.** Agent 1's score box currently reports one
 credited payment of 0.010000 and two passing validations. Those are real — the payment is an
