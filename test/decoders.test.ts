@@ -4,7 +4,7 @@
  * The fixtures are not invented. Every base64 blob below was captured from
  * Algorand TestNet with
  *
- *   curl "https://testnet-api.algonode.cloud/v2/applications/768633998/box?name=b64:YWdfAAAAAAAAAAE="
+ *   curl "https://testnet-api.algonode.cloud/v2/applications/769444119/box?name=b64:YWdfAAAAAAAAAAE="
  *
  * so a decoder that drifts from what the deployed contracts actually write
  * fails here, offline, instead of returning confident nonsense at runtime.
@@ -36,13 +36,13 @@ import { REGISTRY_APP_IDS, jobStatusName } from "../src/config.js";
 const b64 = (s: string) => new Uint8Array(Buffer.from(s, "base64"));
 const hex = (u: Uint8Array) => Buffer.from(u).toString("hex");
 
-/** IdentityRegistry 768633998, box `ag_` + uint64(1). */
+/** IdentityRegistry 769444119, box `ag_` + uint64(1). */
 const AGENT_1_BOX =
   "AAAAAAAAAAEAOlBHHKthrrBUpBWu5dvDA7U5EY0eIO91MNt3AEq8gxEmAAAAAGpyF1YAAAAAanIXVgAWcmlwYXItYWdlbnQudmVyY2VsLmFwcA==";
-/** ReputationRegistry 768633999, box `sc_` + uint64(1). */
+/** ReputationRegistry 769444120, box `sc_` + uint64(1). */
 const SCORE_1_BOX =
   "AAAAAAAAAAEAAAAAAAAAAQAAAAAAACcQAAAAAAAAAAIAAAAAAAAAAAAAAABqchdhAAAAAGpyF5I=";
-/** ValidationRegistry 768634000, box `jb_` + uint64(1). */
+/** ValidationRegistry 769444121, box `jb_` + uint64(1). */
 const JOB_1_BOX =
   "AAAAAAAAAAFQRxyrYa6wVKQVruXbwwO1ORGNHiDvdTDbdwBKvIMRJgAAAAAAAAABAAAAAAAAAAIAAAAAAA9CQABcAH4AAAAAAAAAAwAAAABqchdmAAAAAGpyF3cAIAcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHACAJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQ==";
 /** `dm_agent-1785821796525.ripar.io` and `ad_<pubkey>` both hold a bare uint64. */
@@ -204,7 +204,7 @@ describe("box names", () => {
   });
 
   it("matches the box names algod actually returns", () => {
-    // These are the exact names from GET /v2/applications/768633998/boxes.
+    // These are the exact names from GET /v2/applications/769444119/boxes.
     expect(Buffer.from(agentBoxName(1)).toString("base64")).toBe("YWdfAAAAAAAAAAE=");
     expect(Buffer.from(domainBoxName(AGENT_1_DOMAIN)).toString("base64")).toBe(
       "ZG1fcmlwYXItYWdlbnQudmVyY2VsLmFwcA=="

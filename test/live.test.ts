@@ -38,7 +38,7 @@ const registry = new RiparRegistry();
 const APPS = REGISTRY_APP_IDS.testnet;
 
 describeLive("live TestNet registries", () => {
-  it("reads agent_count out of IdentityRegistry 768633998", async () => {
+  it("reads agent_count out of IdentityRegistry 769444119", async () => {
     const total = await registry.totalAgents();
     expect(typeof total).toBe("number");
     // The registry has been exercised, so at least one agent exists.
@@ -74,7 +74,7 @@ describeLive("live TestNet registries", () => {
     expect(await registry.getAgent(999_999)).toBeNull();
   });
 
-  it("reads a score box from ReputationRegistry 768633999", async () => {
+  it("reads a score box from ReputationRegistry 769444120", async () => {
     const [agent] = await registry.listAgents(1);
     const score = await registry.getScore(agent!.agentId);
     if (score === null) {
@@ -88,7 +88,7 @@ describeLive("live TestNet registries", () => {
     if (score.jobsPaid > 0) expect(score.firstAt).toBeGreaterThan(1_600_000_000);
   });
 
-  it("reads jobs from ValidationRegistry 768634000 with valid spec hashes", async () => {
+  it("reads jobs from ValidationRegistry 769444121 with valid spec hashes", async () => {
     const jobs = await registry.listJobs({ limit: 10 });
     expect(await registry.totalJobs()).toBeGreaterThanOrEqual(jobs.length);
     for (const job of jobs) {
@@ -274,7 +274,7 @@ describeLive("live TestNet registries", () => {
     const report = await deploymentReport(registry.config);
     const byName = Object.fromEntries(report.methods.map((m) => [m.name, m]));
 
-    // These read false until registries 768633998 / 768633999 / 768634000 were
+    // These read false until registries 769444119 / 769444120 / 769444121 were
     // deployed on 2026-08-05. If any flips BACK to false, the config is pointing
     // at an older generation — which is a misconfiguration, not a code change.
     expect(byName.place_bid!.onChain, "place_bid").toBe(true);

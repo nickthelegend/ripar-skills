@@ -265,7 +265,7 @@ describe("the MCP server over an in-memory transport", () => {
   });
 
   it("returns a real chain read as JSON content", async () => {
-    // The `ag_` box for agent 1, captured from IdentityRegistry 768633998 — a
+    // The `ag_` box for agent 1, captured from IdentityRegistry 769444119 — a
     // real record, served without a network so the assertions can be exact.
     const registry = new RiparRegistry({
       fetch: (async (url: string) => {
@@ -313,8 +313,8 @@ describe("the MCP server over an in-memory transport", () => {
                   g("job_count", 1),
                   g("escrow_asset", 10_458_941),
                   g("dispute_window", 20),
-                  g("identity_app", 768_633_998),
-                  g("reputation_app", 768_633_999),
+                  g("identity_app", 769_444_119),
+                  g("reputation_app", 769_444_120),
                 ],
               },
             }),

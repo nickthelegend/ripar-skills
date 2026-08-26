@@ -9,10 +9,17 @@
 
 export type Network = "testnet" | "mainnet";
 
-/** The three Ripar registries. TestNet is the only network they exist on today. */
+/** The three Ripar registries. TestNet is the only network they exist on today.
+ *
+ *  These named 768633998/999/634000 until now — a superseded generation that is
+ *  still on chain and still answers reads, so every lookup succeeded while
+ *  returning the wrong thing: agent 1 resolved to KBDRZK3B… instead of
+ *  NGVUO43A…, and 768634000 is bootstrapped to rUSDC 768547363 with a 20-second
+ *  dispute window, where the live one settles real USDC 10458941 over 300s.
+ *  A dead registry does not error; it understates. */
 export const REGISTRY_APP_IDS = {
   testnet: {
-    identity: 768633998,
+    identity: 769444119,
     // v4. v1 (768547170) took the payment id and amount as ARGUMENTS and only
     // checked the id was 32 bytes and unseen, so a score could be minted from
     // bytes — two of the scores it published resolve to no transaction at all.
@@ -24,8 +31,8 @@ export const REGISTRY_APP_IDS = {
     // record_validation, called by the ValidationRegistry and by nothing else,
     // so a verdict finally reaches the score — before it, `validated` and
     // `disputed` were permanently 0 while jobs plainly read VALIDATED.
-    reputation: 768633999,
-    validation: 768634000,
+    reputation: 769444120,
+    validation: 769444121,
   },
 } as const satisfies Record<"testnet", Record<string, number>>;
 
@@ -99,7 +106,7 @@ export const BOX_PREFIX = {
    * bid on one job shares a byte prefix and algod can filter the listing
    * server-side.
    *
-   * Live on 768634000 since 2026-08-05. Against an OLDER ValidationRegistry —
+   * Live on 769444121 since 2026-08-05. Against an OLDER ValidationRegistry —
    * and eight earlier generations are still on chain, still answering — this
    * prefix matches zero boxes, which is a real, checkable answer rather than an
    * error. `src/deployed.ts` is what stops a WRITE against those same missing

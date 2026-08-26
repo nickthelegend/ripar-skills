@@ -36,7 +36,7 @@ export const SERVER_VERSION = "0.1.0";
 
 export const SERVER_INSTRUCTIONS = `
 Ripar's agent-interoperability tools, reading three registries that are live on Algorand TestNet:
-IdentityRegistry 768633998, ReputationRegistry 768633999, ValidationRegistry 768634000.
+IdentityRegistry 769444119, ReputationRegistry 769444120, ValidationRegistry 769444121.
 
 Two things to know before using these:
 

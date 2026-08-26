@@ -4,7 +4,7 @@
  *
  * `place_bid`, `accept_bid` and `rotate_address` were AHEAD of the chain for
  * most of this project's life: they compiled, and no deployed registry routed
- * them. Registries 768633998 / 768633999 / 768634000, deployed 2026-08-05,
+ * them. Registries 769444119 / 769444120 / 769444121, deployed 2026-08-05,
  * route all 36 compiled methods, so that gap is closed.
  *
  * The file still has two jobs, and the second is still the important one:
@@ -143,7 +143,7 @@ function programWith(signatures: string[]): string {
 
 /** Every method the LIVE registries really route today, per the deployed ABI.
  *
- *  Registries 768633998 / 768633999 / 768634000, deployed 2026-08-05, route all
+ *  Registries 769444119 / 769444120 / 769444121, deployed 2026-08-05, route all
  *  36 compiled methods. The bidding set and rotate_address were absent from
  *  every earlier generation, which is why the guard exists at all — keep this
  *  list matching the chain, because `deploymentReport` is asserted against it. */
@@ -529,7 +529,7 @@ describe("composePlaceBid", () => {
     }).catch((e) => e);
 
     expect(err).toBeInstanceOf(MethodNotDeployedError);
-    expect(err.message).toMatch(/place_bid.*is not deployed on app 768634000/);
+    expect(err.message).toMatch(/place_bid.*is not deployed on app 769444121/);
     expect(err.message).toMatch(/assign_job/);
     // The selector is in the message so the claim can be checked by hand
     // against the program on an explorer.
@@ -724,7 +724,7 @@ describe("composeAcceptBid", () => {
       (e) => e
     );
     expect(err).toBeInstanceOf(MethodNotDeployedError);
-    expect(err.message).toMatch(/accept_bid\(uint64,uint64\)bool is not deployed on app 768634000/);
+    expect(err.message).toMatch(/accept_bid\(uint64,uint64\)bool is not deployed on app 769444121/);
     expect(err.message).toMatch(/assign_job/);
   });
 
@@ -837,7 +837,7 @@ describe("the ripar_list_bids tool", () => {
     // An empty list with no explanation reads as "nobody bid". It has to say
     // that no bid COULD exist here, or a reader draws the wrong conclusion
     // about the job rather than about the registry.
-    expect(out.notes.join(" ")).toMatch(/place_bid is NOT in app 768634000's approval program/);
+    expect(out.notes.join(" ")).toMatch(/place_bid is NOT in app 769444121's approval program/);
     expect(out.notes.join(" ")).toMatch(/naming an agent directly/);
   });
 
@@ -903,7 +903,7 @@ describe("composeRotateAddress", () => {
     }).catch((e) => e);
 
     expect(err).toBeInstanceOf(MethodNotDeployedError);
-    expect(err.message).toMatch(/rotate_address\(uint64,address\)bool is not deployed on app 768633998/);
+    expect(err.message).toMatch(/rotate_address\(uint64,address\)bool is not deployed on app 769444119/);
     expect(err.message).toMatch(/NO KEY RECOVERY ON CHAIN TODAY/);
     // The fallback is offered AND its cost is stated. An alternative presented
     // without its cost is advice to lose the identity.

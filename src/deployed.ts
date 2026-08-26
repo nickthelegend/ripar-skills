@@ -4,12 +4,12 @@
  * The contracts in `ripar-contracts/contracts/*.py` were AHEAD of the chain for
  * most of this project's life. Bidding, key rotation, milestone release, job
  * expiry and a protocol fee all compiled while no deployed registry routed
- * them, because the deployer had run out of TestNet ALGO. As of 2026-08-05 the
- * live registries route all 36 compiled methods:
+ * them, because the deployer had run out of TestNet ALGO. The live registries
+ * route all 36 compiled methods:
  *
- *     IdentityRegistry   768633998
- *     ReputationRegistry 768633999
- *     ValidationRegistry 768634000
+ *     IdentityRegistry   769444119
+ *     ReputationRegistry 769444120
+ *     ValidationRegistry 769444121
  *
  * This module stays, and stays load bearing, for two reasons. A config pointed
  * at an older generation is still a config that exists — nine of them were
@@ -59,7 +59,7 @@ import type { RiparConfig } from "./config.js";
  *
  * Transcribed from `ripar-contracts/contracts/artifacts/IdentityRegistry.arc56.json`
  * and `ValidationRegistry.arc56.json`. `deployed` records where each one stood
- * on 2026-08-05 — registries 768633998 / 768633999 / 768634000, where all 36
+ * against the live registries 769444119 / 769444120 / 769444121, where all 36
  * compiled methods are dispatchable — and is DOCUMENTATION ONLY. Every runtime
  * decision below reads the chain, so a stale note here can mislead a reader; it
  * cannot mislead a call. The bidding methods and rotate_address read `false`

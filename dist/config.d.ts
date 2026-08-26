@@ -7,12 +7,19 @@
  * a number; if a read fails you get an error, never a plausible-looking zero.
  */
 export type Network = "testnet" | "mainnet";
-/** The three Ripar registries. TestNet is the only network they exist on today. */
+/** The three Ripar registries. TestNet is the only network they exist on today.
+ *
+ *  These named 768633998/999/634000 until now — a superseded generation that is
+ *  still on chain and still answers reads, so every lookup succeeded while
+ *  returning the wrong thing: agent 1 resolved to KBDRZK3B… instead of
+ *  NGVUO43A…, and 768634000 is bootstrapped to rUSDC 768547363 with a 20-second
+ *  dispute window, where the live one settles real USDC 10458941 over 300s.
+ *  A dead registry does not error; it understates. */
 export declare const REGISTRY_APP_IDS: {
     readonly testnet: {
-        readonly identity: 768633998;
-        readonly reputation: 768633999;
-        readonly validation: 768634000;
+        readonly identity: 769444119;
+        readonly reputation: 769444120;
+        readonly validation: 769444121;
     };
 };
 export type RegistryName = keyof (typeof REGISTRY_APP_IDS)["testnet"];
@@ -74,7 +81,7 @@ export declare const BOX_PREFIX: {
      * bid on one job shares a byte prefix and algod can filter the listing
      * server-side.
      *
-     * Live on 768634000 since 2026-08-05. Against an OLDER ValidationRegistry —
+     * Live on 769444121 since 2026-08-05. Against an OLDER ValidationRegistry —
      * and eight earlier generations are still on chain, still answering — this
      * prefix matches zero boxes, which is a real, checkable answer rather than an
      * error. `src/deployed.ts` is what stops a WRITE against those same missing
