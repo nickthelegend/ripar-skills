@@ -10,12 +10,12 @@ Two protocols, one package:
 Everything it reads comes off three registries that are **live on Algorand TestNet**. Nothing here signs anything: a write comes back as an unsigned transaction for a human or a wallet to approve.
 
 ```
-IdentityRegistry     768633998    who an agent is
-ReputationRegistry   768633999    what payments have been credited to it
-ValidationRegistry   768634000    what work is open, how it was judged, and what is escrowed
+IdentityRegistry     769444119    who an agent is
+ReputationRegistry   769444120    what payments have been credited to it
+ValidationRegistry   769444121    what work is open, how it was judged, and what is escrowed
 ```
 
-You can check those on the explorer right now: <https://testnet.explorer.perawallet.app/application/768633998>
+You can check those on the explorer right now: <https://testnet.explorer.perawallet.app/application/769444119>
 
 > **A job carries two money numbers and they are not the same thing.** The **budget** is what the
 > client says the work is worth. The **escrow** is what they have actually handed to the contract.
@@ -43,7 +43,7 @@ printf '%s\n%s\n%s\n' \
   | node dist/bin/mcp-stdio.js 2>/dev/null
 ```
 
-That returns agent 1's real score, read out of box `sc_` on app 768633999 while you wait.
+That returns agent 1's real score, read out of box `sc_` on app 769444120 while you wait.
 
 ---
 
@@ -129,7 +129,7 @@ claude mcp add ripar -- node /absolute/path/to/ripar-skills/dist/bin/mcp-stdio.j
   "unsignedTxnBase64": "iqRhcGFhlMQE6xJnHsQiACBdanwFPa6OATBBTNfKO3sHnSiP…",
   "txId": "IM2SP7CUFPBNC5BSJJEKG2FDCLPXPSKZKY53IZHTOAVERKEOMMUA",
   "method": "post_job(byte[],uint64,uint64)uint64",
-  "summary": "Open job #3 on ValidationRegistry 768634000 with a budget of 2.500000 USDC, committing to spec hash 5d6a7c…, to be judged by agent 1. Signing this makes UBB4… the job's client.",
+  "summary": "Open job #3 on ValidationRegistry 769444121 with a budget of 2.500000 USDC, committing to spec hash 5d6a7c…, to be judged by agent 1. Signing this makes UBB4… the job's client.",
   "boxes": ["jb_3"],
   "nextSteps": ["…", "Sign it with the wallet that holds `sender`; this package holds no key and cannot sign.", "…"]
 }
@@ -207,10 +207,10 @@ Four ship, all backed by the registries:
 
 | Skill | Price | Backed by |
 | --- | --- | --- |
-| `ripar.identity.resolve` | free | `ag_` / `dm_` / `ad_` boxes on 768633998 |
-| `ripar.reputation.report` | $0.01 | `sc_` boxes on 768633999 |
-| `ripar.settlement.audit` | $0.02 | `sc_` boxes on 768633999 + the Algorand indexer |
-| `ripar.validation.post-job` | $0.05 | `jb_` boxes on 768634000 (returns an unsigned tx) |
+| `ripar.identity.resolve` | free | `ag_` / `dm_` / `ad_` boxes on 769444119 |
+| `ripar.reputation.report` | $0.01 | `sc_` boxes on 769444120 |
+| `ripar.settlement.audit` | $0.02 | `sc_` boxes on 769444120 + the Algorand indexer |
+| `ripar.validation.post-job` | $0.05 | `jb_` boxes on 769444121 (returns an unsigned tx) |
 
 Reads that cost nothing to serve are priced at zero rather than given a token price. Charging for a public box read would be theatre.
 
