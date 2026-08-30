@@ -19,7 +19,7 @@ export type Network = "testnet" | "mainnet";
  *  A dead registry does not error; it understates. */
 export const REGISTRY_APP_IDS = {
   testnet: {
-    identity: 769444119,
+    identity: 770382913,
     // v4. v1 (768547170) took the payment id and amount as ARGUMENTS and only
     // checked the id was 32 bytes and unseen, so a score could be minted from
     // bytes — two of the scores it published resolve to no transaction at all.
@@ -31,8 +31,8 @@ export const REGISTRY_APP_IDS = {
     // record_validation, called by the ValidationRegistry and by nothing else,
     // so a verdict finally reaches the score — before it, `validated` and
     // `disputed` were permanently 0 while jobs plainly read VALIDATED.
-    reputation: 769444120,
-    validation: 769444121,
+    reputation: 770382914,
+    validation: 770382915,
   },
 } as const satisfies Record<"testnet", Record<string, number>>;
 
