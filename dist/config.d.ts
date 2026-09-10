@@ -17,9 +17,9 @@ export type Network = "testnet" | "mainnet";
  *  A dead registry does not error; it understates. */
 export declare const REGISTRY_APP_IDS: {
     readonly testnet: {
-        readonly identity: 769444119;
-        readonly reputation: 769444120;
-        readonly validation: 769444121;
+        readonly identity: 770382913;
+        readonly reputation: 770382914;
+        readonly validation: 770382915;
     };
 };
 export type RegistryName = keyof (typeof REGISTRY_APP_IDS)["testnet"];
