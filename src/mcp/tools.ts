@@ -15,17 +15,20 @@
  * else, and the annotations say so honestly.
  *
  * Three of the compose tools — `ripar_place_bid`, `ripar_accept_bid` and
- * `ripar_rotate_address` — target methods that exist in ripar-contracts and are
- * NOT on the live registries, which ran out of deployment budget mid-generation.
- * They do not pretend otherwise and they do not fail obscurely: each one reads
- * the target app's approval program for the method's selector before composing,
- * and refuses with what the deployed contract does offer instead. See
- * `src/deployed.ts`.
+ * `ripar_rotate_address` — target methods whose presence on the LIVE registries
+ * varies, because the deployed generation predates part of the audited ABI.
+ * Verified against the deployed approval programs rather than assumed:
+ * `accept_bid(uint64,uint64)bool` and `rotate_address(uint64,address)bool` ARE
+ * live; `place_bid` is not present under any signature. This header used to say
+ * all three were missing while the tool descriptions said all three were
+ * deployed — the file contradicted itself, and both halves were partly wrong.
+ * Each tool reads the target app's approval program for the selector before
+ * composing and refuses with what the contract does offer. See `src/deployed.ts`.
  */
 
 import { z } from "zod";
 import { microToUsdc, type RiparRegistry } from "../registry.js";
-import type { RiparConfig } from "../config.js";
+import { REGISTRY_APP_IDS, type RiparConfig } from "../config.js";
 import {
   composeAcceptBid,
   composeFundJob,
@@ -63,13 +66,22 @@ export type RiparToolSpec = {
 
 const jobStatusValues = Object.values(JOB_STATUS) as [string, ...string[]];
 
+/**
+ * The ids the descriptions quote. Interpolated, never typed out: these strings
+ * are what an LLM client reads to decide what a tool does, and for three
+ * generations they went on naming a superseded registry while the code read the
+ * current one. Prose that repeats a constant is prose that will eventually lie
+ * about it.
+ */
+const LIVE = REGISTRY_APP_IDS.testnet;
+
 export const TOOLS: RiparToolSpec[] = [
   // ------------------------------------------------------------------ reads
   {
     name: "ripar_search_agents",
     title: "Search Ripar agents",
     description:
-      "List or search agents in the on-chain IdentityRegistry (Algorand TestNet app 769444119). " +
+      `List or search agents in the on-chain IdentityRegistry (Algorand TestNet app ${LIVE.identity}). ` +
       "Matches a substring of the agent's domain, or an exact agent id or Algorand address. " +
       "Returns live registry records — if the chain is unreachable this fails rather than guessing.",
     inputShape: {
@@ -150,7 +162,7 @@ export const TOOLS: RiparToolSpec[] = [
     name: "ripar_get_reputation",
     title: "Get an agent's reputation",
     description:
-      "Read an agent's score from the ReputationRegistry (Algorand TestNet app 769444120): payments " +
+      `Read an agent's score from the ReputationRegistry (Algorand TestNet app ${LIVE.reputation}): payments ` +
       "credited to it, total USDC volume, and validator verdicts. Each credit is keyed to a payment " +
       "transaction id and the contract refuses to count the same id twice, but it does NOT verify " +
       "that the id names a real transfer — so treat a score as a claim recorded on chain, not one " +
@@ -173,7 +185,7 @@ export const TOOLS: RiparToolSpec[] = [
     name: "ripar_list_jobs",
     title: "List validated jobs, with what is actually escrowed",
     description:
-      "List jobs on the ValidationRegistry (Algorand TestNet app 769444121), newest first, " +
+      `List jobs on the ValidationRegistry (Algorand TestNet app ${LIVE.validation}), newest first, ` +
       "optionally filtered by status or by the agent serving or validating them. Each job commits " +
       "to its spec by hash; the spec and the result themselves stay offchain. " +
       "Every job reports BOTH numbers, and they mean different things: the BUDGET is what the " +
@@ -472,7 +484,7 @@ export const TOOLS: RiparToolSpec[] = [
       "a board that erases what it turned down cannot be checked afterwards — 'we took the " +
       "cheapest' should be verifiable against the ones that lost. So a bid appearing here does not " +
       "mean it is still live: check the job's status. Only bids on an OPEN job can be accepted. " +
-      "Bidding IS deployed on the live ValidationRegistry (769444121). Against an older registry " +
+      `Bidding is live on ValidationRegistry ${LIVE.validation}: accept_bid is in its approval program. Against an older registry ` +
       "that predates place_bid this returns an empty list and says why, rather than letting " +
       "'no bids' read as 'nobody bid'. Either way it is a real read of a real chain, not a stub.",
     inputShape: {
@@ -585,7 +597,7 @@ export const TOOLS: RiparToolSpec[] = [
       "Only the bidding agent's own address may bid, only while the job is OPEN, and a second bid " +
       "from the same agent REPLACES the first — all three are checked against the chain here so an " +
       "impossible bid fails for free instead of for a fee. " +
-      "place_bid IS deployed on the live registry (769444121). This tool still reads that app's " +
+      `place_bid is NOT in the approval program of the live ValidationRegistry ${LIVE.validation} — the deployed generation predates it, so a compose here is refused rather than submitted. This tool reads that app's ` +
       "approval program before composing anything, so a config pointed at an older generation gets " +
       "an explanation instead of a transaction its router cannot dispatch. Nothing is submitted " +
       "and no key is used or held.",
@@ -643,7 +655,7 @@ export const TOOLS: RiparToolSpec[] = [
       "It also assigns the job in the same call: there is no separate assign step and no window " +
       "where the job is assigned at the old price. Losing bids are not swept and stay readable. " +
       "Client-only and open-jobs-only, both checked against the chain first. " +
-      "accept_bid IS deployed on the live registry (769444121). This still reads that app's " +
+      `accept_bid IS live on ValidationRegistry ${LIVE.validation}, as accept_bid(uint64,uint64)bool. This still reads that app's ` +
       "approval program first, so an older registry gets a clear refusal rather than a call its " +
       "router cannot dispatch. Nothing is submitted and no key is used or held.",
     inputShape: {
@@ -686,7 +698,7 @@ export const TOOLS: RiparToolSpec[] = [
       "The id, the domain and the reputation are preserved and follow the identity. " +
       "Only the CURRENT address may sign, so this is a race: it rescues a key you fear is exposed " +
       "and is useless against one already in use against you — whoever holds it can rotate first. " +
-      "rotate_address IS deployed on the live IdentityRegistry (769444119). This still reads that " +
+      `rotate_address IS live on IdentityRegistry ${LIVE.identity}, as rotate_address(uint64,address)bool. This still reads that ` +
       "app's approval program before composing, so an older registry gets a refusal naming what it " +
       "does offer instead. Nothing is submitted and no key is used or held.",
     inputShape: {

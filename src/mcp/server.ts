@@ -26,7 +26,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { RiparRegistry } from "../registry.js";
-import { resolveConfig, type RiparConfigInput } from "../config.js";
+import { REGISTRY_APP_IDS, resolveConfig, type RiparConfigInput } from "../config.js";
 import { TOOLS, type ToolContext } from "./tools.js";
 import { registerRiparResources } from "./resources.js";
 import { registerRiparPrompts } from "./prompts.js";
@@ -36,7 +36,7 @@ export const SERVER_VERSION = "0.1.0";
 
 export const SERVER_INSTRUCTIONS = `
 Ripar's agent-interoperability tools, reading three registries that are live on Algorand TestNet:
-IdentityRegistry 769444119, ReputationRegistry 769444120, ValidationRegistry 769444121.
+IdentityRegistry ${REGISTRY_APP_IDS.testnet.identity}, ReputationRegistry ${REGISTRY_APP_IDS.testnet.reputation}, ValidationRegistry ${REGISTRY_APP_IDS.testnet.validation}.
 
 Two things to know before using these:
 

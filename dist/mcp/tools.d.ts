@@ -15,16 +15,19 @@
  * else, and the annotations say so honestly.
  *
  * Three of the compose tools — `ripar_place_bid`, `ripar_accept_bid` and
- * `ripar_rotate_address` — target methods that exist in ripar-contracts and are
- * NOT on the live registries, which ran out of deployment budget mid-generation.
- * They do not pretend otherwise and they do not fail obscurely: each one reads
- * the target app's approval program for the method's selector before composing,
- * and refuses with what the deployed contract does offer instead. See
- * `src/deployed.ts`.
+ * `ripar_rotate_address` — target methods whose presence on the LIVE registries
+ * varies, because the deployed generation predates part of the audited ABI.
+ * Verified against the deployed approval programs rather than assumed:
+ * `accept_bid(uint64,uint64)bool` and `rotate_address(uint64,address)bool` ARE
+ * live; `place_bid` is not present under any signature. This header used to say
+ * all three were missing while the tool descriptions said all three were
+ * deployed — the file contradicted itself, and both halves were partly wrong.
+ * Each tool reads the target app's approval program for the selector before
+ * composing and refuses with what the contract does offer. See `src/deployed.ts`.
  */
 import { z } from "zod";
 import { type RiparRegistry } from "../registry.js";
-import type { RiparConfig } from "../config.js";
+import { type RiparConfig } from "../config.js";
 import { SKILLS, skillPriceUsdc, skillInputJsonSchema } from "../skills.js";
 export type ToolContext = {
     registry: RiparRegistry;
