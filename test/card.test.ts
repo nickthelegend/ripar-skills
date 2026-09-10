@@ -24,6 +24,7 @@ import { createCardHandler, riparAgentCard } from "../src/a2a/server.js";
 import { RiparRegistry } from "../src/registry.js";
 import { TOOL_NAMES } from "../src/mcp/tools.js";
 import { SKILLS } from "../src/skills.js";
+import { REGISTRY_APP_IDS } from "../src/config.js";
 
 const PAY_TO = "UBB4PNTT7CI3IQS25ZMQR4DGVYYCBORNSBLU4WKUGX4BAZ3KN4O2KATPAU";
 
@@ -142,7 +143,7 @@ describe("parseAgentCard: Ripar extensions", () => {
         },
         {
           uri: RIPAR_EXT.registry,
-          params: { chain: "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDe", agentId: 1, identityApp: 769444119 },
+          params: { chain: "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDe", agentId: 1, identityApp: REGISTRY_APP_IDS.testnet.identity },
         },
         {
           uri: RIPAR_EXT.mcp,
@@ -170,7 +171,7 @@ describe("parseAgentCard: Ripar extensions", () => {
     expect(registry).toEqual({
       chain: "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDe",
       agentId: 1,
-      identityApp: 769444119,
+      identityApp: REGISTRY_APP_IDS.testnet.identity,
       reputationApp: undefined,
       validationApp: undefined,
     });
@@ -317,9 +318,9 @@ describe("riparAgentCard", () => {
     const parsed = parseAgentCard(card);
     expect(parsed.registry).toMatchObject({
       agentId: 1,
-      identityApp: 769444119,
-      reputationApp: 769444120,
-      validationApp: 769444121,
+      identityApp: REGISTRY_APP_IDS.testnet.identity,
+      reputationApp: REGISTRY_APP_IDS.testnet.reputation,
+      validationApp: REGISTRY_APP_IDS.testnet.validation,
     });
     // With an id claimed and the apps named, it should not warn about being unbacked.
     expect(parsed.warnings.join(" ")).not.toMatch(/no registry extension/);

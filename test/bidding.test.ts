@@ -529,7 +529,7 @@ describe("composePlaceBid", () => {
     }).catch((e) => e);
 
     expect(err).toBeInstanceOf(MethodNotDeployedError);
-    expect(err.message).toMatch(/place_bid.*is not deployed on app 769444121/);
+    expect(err.message).toMatch(new RegExp(`place_bid.*is not deployed on app ${REGISTRY_APP_IDS.testnet.validation}`));
     expect(err.message).toMatch(/assign_job/);
     // The selector is in the message so the claim can be checked by hand
     // against the program on an explorer.
@@ -724,7 +724,7 @@ describe("composeAcceptBid", () => {
       (e) => e
     );
     expect(err).toBeInstanceOf(MethodNotDeployedError);
-    expect(err.message).toMatch(/accept_bid\(uint64,uint64\)bool is not deployed on app 769444121/);
+    expect(err.message).toMatch(new RegExp(`accept_bid\\(uint64,uint64\\)bool is not deployed on app ${REGISTRY_APP_IDS.testnet.validation}`));
     expect(err.message).toMatch(/assign_job/);
   });
 
@@ -837,7 +837,7 @@ describe("the ripar_list_bids tool", () => {
     // An empty list with no explanation reads as "nobody bid". It has to say
     // that no bid COULD exist here, or a reader draws the wrong conclusion
     // about the job rather than about the registry.
-    expect(out.notes.join(" ")).toMatch(/place_bid is NOT in app 769444121's approval program/);
+    expect(out.notes.join(" ")).toMatch(new RegExp(`place_bid is NOT in app ${REGISTRY_APP_IDS.testnet.validation}'s approval program`));
     expect(out.notes.join(" ")).toMatch(/naming an agent directly/);
   });
 
@@ -903,7 +903,7 @@ describe("composeRotateAddress", () => {
     }).catch((e) => e);
 
     expect(err).toBeInstanceOf(MethodNotDeployedError);
-    expect(err.message).toMatch(/rotate_address\(uint64,address\)bool is not deployed on app 769444119/);
+    expect(err.message).toMatch(new RegExp(`rotate_address\\(uint64,address\\)bool is not deployed on app ${REGISTRY_APP_IDS.testnet.identity}`));
     expect(err.message).toMatch(/NO KEY RECOVERY ON CHAIN TODAY/);
     // The fallback is offered AND its cost is stated. An alternative presented
     // without its cost is advice to lose the identity.
